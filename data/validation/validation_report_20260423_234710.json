@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-04-23T23:47:10.860882",
+  "nodes": {
+    "CATL_Ningde": {
+      "mae": 90.76,
+      "rmse": 162.26,
+      "coverage": 57.1,
+      "ranking_stability": 0.923,
+      "num_events": 224,
+      "forecast_days": 14
+    },
+    "Port_of_Long_Beach": {
+      "mae": 343.37,
+      "rmse": 624.2,
+      "coverage": 100.0,
+      "ranking_stability": 0.92,
+      "num_events": 591,
+      "forecast_days": 14
+    },
+    "TSMC_Hsinchu": {
+      "mae": 54.29,
+      "rmse": 72.33,
+      "coverage": 64.3,
+      "ranking_stability": 0.896,
+      "num_events": 50,
+      "forecast_days": 14
+    },
+    "Foxconn_Zhengzhou": {
+      "mae": 168.73,
+      "rmse": 323.39,
+      "coverage": 64.3,
+      "ranking_stability": 0.922,
+      "num_events": 481,
+      "forecast_days": 14
+    },
+    "Tesla_Berlin": {
+      "mae": 352.84,
+      "rmse": 565.45,
+      "coverage": 100.0,
+      "ranking_stability": 0.918,
+      "num_events": 694,
+      "forecast_days": 14
+    },
+    "Albemarle_Chile": {
+      "mae": 17.96,
+      "rmse": 25.1,
+      "coverage": 100.0,
+      "ranking_stability": 0.902,
+      "num_events": 47,
+      "forecast_days": 14
+    }
+  }
+}

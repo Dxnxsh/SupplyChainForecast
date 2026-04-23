@@ -1,261 +1,103 @@
-aiofiles==25.1.0
-aiohappyeyeballs==2.6.1
+# =========================
+# CORE WEB STACK
+# =========================
+Django==5.1.13
+djangorestframework==3.15.2
+djangorestframework-simplejwt==5.5.1
+django-cors-headers==4.7.0
+django-filter==24.3
+django-environ==0.10.0
+
+fastapi==0.118.3
+uvicorn==0.37.0
+python-multipart==0.0.20
+
+starlette==0.48.0
+
+# =========================
+# DATABASE
+# =========================
+psycopg2-binary==2.9.10
+SQLAlchemy==2.0.44
+redis==5.2.1
+
+# =========================
+# DATA / SCIENCE
+# =========================
+numpy==1.26.4
+pandas==2.3.3
+scipy==1.16.2
+matplotlib==3.10.7
+plotly==6.3.1
+openpyxl==3.1.5
+
+# =========================
+# ML / AI
+# =========================
+torch==2.8.0
+transformers==4.57.0
+safetensors==0.6.2
+tiktoken==0.12.0
+openai==1.109.1
+
+prophet==1.1.7
+nltk==3.9.2
+regex==2025.9.18
+scikit-learn
+
+# =========================
+# NLP (CLEAN SPA CY STACK)
+# =========================
+spacy==3.7.4
+
+# =========================
+# ASYNC / HTTP
+# =========================
 aiohttp==3.13.0
-aiosignal==1.4.0
-aiosqlite==0.21.0
-alphashape==1.3.1
-annotated-types==0.7.0
-anyio==4.11.0
-appdirs==1.4.4
-argcomplete==3.6.2
-asgiref==3.10.0
-attr==0.3.1
-attrs==25.4.0
-azure-core==1.36.0
-azure-storage-blob==12.27.0
+aiofiles==25.1.0
+httpx==0.28.1
+requests==2.32.5
+urllib3==2.5.0
+
+# =========================
+# SCRAPING / CRAWLING
+# =========================
 beautifulsoup4==4.14.2
-black==25.9.0
-bleach==5.0.1
-blis==1.3.0
-boto==2.49.0
+lxml==5.4.0
+playwright==1.55.0
+Crawl4AI==0.7.4
+
+# =========================
+# CLOUD / STORAGE
+# =========================
 boto3==1.40.55
 botocore==1.40.55
-Brotli==1.1.0
-cachetools==6.2.1
-catalogue==2.0.10
-certifi==2025.10.5
-cffi==2.0.0
-chardet==5.2.0
-charset-normalizer==3.4.3
-click==8.3.0
-click-log==0.4.0
-cloudpathlib==0.23.0
-cmdstanpy==1.2.5
-colorama==0.4.6
-confection==0.1.5
-contourpy==1.3.3
-Crawl4AI==0.7.4
+azure-storage-blob==12.27.0
+
+# =========================
+# AUTH / SECURITY
+# =========================
 cryptography==46.0.2
-cycler==0.12.1
-cymem==2.0.11
-datamodel-code-generator==0.26.1
-defusedxml==0.7.1
-distro==1.9.0
-Django==5.1.13
-django-annoying==0.10.6
-django-cors-headers==4.7.0
-django-csp==3.7
-django-debug-toolbar==3.2.1
-django-environ==0.10.0
-django-extensions==3.2.3
-django-filter==24.3
-django-migration-linter==5.2.0
-django-model-utils==4.1.1
-django-ranged-fileresponse==0.1.2
-django-rq==2.10.3
-django-storages==1.12.3
-django-user-agents==0.4.0
-djangorestframework==3.15.2
-djangorestframework_simplejwt==5.5.1
-dnspython==2.8.0
-drf-dynamic-fields==0.3.0
-drf-flex-fields==0.9.5
-drf-generators==0.3.0
-drf-spectacular==0.28.0
-email-validator==2.3.0
-en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
-et_xmlfile==2.0.0
-expiringdict==1.2.2
-fake-http-header==0.3.5
-fake-useragent==2.2.0
-Faker==37.11.0
-fastapi==0.118.3
-fastapi-cli==0.0.13
-fastapi-cloud-cli==0.3.1
-fastuuid==0.13.5
-filelock==3.20.0
-fonttools==4.60.1
-frozenlist==1.8.0
-fsspec==2025.9.0
-genson==1.3.0
-geographiclib==2.1
-geopy==2.4.1
-google-api-core==2.26.0
-google-auth==2.41.1
-google-cloud-appengine-logging==1.7.0
-google-cloud-audit-log==0.4.0
-google-cloud-core==2.4.3
-google-cloud-logging==3.12.1
-google-cloud-storage==2.19.0
-google-crc32c==1.7.1
-google-resumable-media==2.7.2
-googleapis-common-protos==1.70.0
-greenlet==3.2.4
-grpc-google-iam-v1==0.14.3
-grpcio==1.75.1
-grpcio-status==1.75.1
-h11==0.16.0
-h2==4.3.0
-hf-xet==1.1.10
-holidays==0.82
-hpack==4.1.0
-httpcore==1.0.9
-httptools==0.7.1
-httpx==0.28.1
-huggingface-hub==0.35.3
-humanize==4.13.0
-hyperframe==6.1.0
-idna==3.10
-ijson==3.4.0.post0
-importlib_metadata==8.7.0
-importlib_resources==6.5.2
-inflect==5.6.2
-inflection==0.5.1
-isodate==0.7.2
-isort==5.13.2
-itsdangerous==2.2.0
-Jinja2==3.1.6
-jiter==0.11.0
-jmespath==1.0.1
-joblib==1.5.2
-jsf==0.11.2
-jsonschema==4.25.1
-jsonschema-specifications==2025.9.1
-kiwisolver==1.4.9
-label-studio==1.21.0
-label-studio-sdk==2.0.4
-langcodes==3.5.0
-langdetect==1.0.9
-language_data==1.3.0
-lark==1.3.0
-launchdarkly-server-sdk==8.2.1
-litellm==1.77.7
-lockfile==0.12.2
-lxml==5.4.0
-lxml_html_clean==0.4.3
-marisa-trie==1.3.1
-markdown-it-py==4.0.0
-MarkupSafe==3.0.3
-matplotlib==3.10.7
-mdurl==0.1.2
-mpmath==1.3.0
-multidict==6.7.0
-murmurhash==1.0.13
-mypy_extensions==1.1.0
-narwhals==2.10.0
-networkx==3.5
-nltk==3.9.2
-numpy==1.26.4
-openai==1.109.1
-opencv-python==4.11.0.86
-openpyxl==3.1.5
-opentelemetry-api==1.38.0
-ordered-set==4.0.2
-orjson==3.11.3
-packaging==25.0
-pandas==2.3.3
-patchright==1.55.2
-pathspec==0.12.1
-pillow==11.3.0
-platformdirs==4.5.0
-playwright==1.55.0
-plotly==6.3.1
-preshed==3.0.10
-propcache==0.4.1
-prophet==1.1.7
-proto-plus==1.26.1
-protobuf==6.33.0
-psutil==7.1.0
-psycopg2-binary==2.9.10
-pyarrow==18.1.0
-pyasn1==0.6.1
-pyasn1_modules==0.4.2
-pyboxen==1.3.0
-pycparser==2.23
-pydantic==2.12.0
-pydantic-extra-types==2.10.6
-pydantic-settings==2.11.0
-pydantic_core==2.41.1
-pyee==13.0.0
-Pygments==2.19.2
 PyJWT==2.10.1
-pyOpenSSL==25.3.0
-pyparsing==3.2.5
-pyRFC3339==2.1.0
-python-dateutil==2.9.0.post0
 python-dotenv==1.1.1
-python-json-logger==2.0.4
-python-multipart==0.0.20
-pytokens==0.2.0
-pytz==2022.7.1
-PyYAML==6.0.3
-rank-bm25==0.2.2
-redis==5.2.1
-referencing==0.36.2
-regex==2025.9.18
-requests==2.32.5
-requests-file==3.0.0
-requests-mock==1.12.1
-rich==14.2.0
-rich-toolkit==0.15.1
-rignore==0.7.0
-rpds-py==0.27.1
-rq==1.16.2
-rsa==4.9.1
-rstr==3.2.2
-rtree==1.4.1
-rules==3.4
-s3transfer==0.14.0
-safetensors==0.6.2
-scipy==1.16.2
-semver==3.0.4
-sentry-sdk==2.41.0
-shapely==2.1.2
-shellingham==1.5.4
-six==1.17.0
-smart_open==7.3.1
-sniffio==1.3.1
-snowballstemmer==2.2.0
-soupsieve==2.8
-spacy==3.8.7
-spacy-legacy==3.0.12
-spacy-loggers==1.0.5
-SQLAlchemy==2.0.44
-sqlparse==0.5.3
-srsly==2.5.1
-stanio==0.5.1
-starlette==0.48.0
-sympy==1.14.0
-tf-playwright-stealth==1.2.0
-thinc==8.3.6
-tiktoken==0.12.0
-tldextract==5.3.0
-tokenizers==0.22.1
-toml==0.10.2
-torch==2.8.0
+
+# =========================
+# UTILITIES
+# =========================
 tqdm==4.67.1
-transformers==4.57.0
-trimesh==4.8.3
-typer==0.19.2
-typing-inspection==0.4.2
-typing_extensions==4.15.0
-tzdata==2025.2
-ua-parser==1.0.1
-ua-parser-builtins==0.18.0.post1
-ujson==5.11.0
-uritemplate==4.2.0
-urllib3==2.5.0
-user-agents==2.2.0
-uvicorn==0.37.0
-uvloop==0.21.0
-vaderSentiment==3.3.2
-wasabi==1.1.3
-watchfiles==1.1.0
-weasel==0.4.1
-webencodings==0.5.1
-websockets==15.0.1
-wrapt==1.17.3
-xmljson==0.2.1
-xxhash==3.6.0
-yarl==1.22.0
-zipp==3.23.0
+rich==14.2.0
+loguru
+pydantic==2.12.0
+email-validator==2.3.0
+
+# =========================
+# GEOSPATIAL
+# =========================
+geopy==2.4.1
+shapely==2.1.2
+
+# =========================
+# OPTIONAL (ONLY IF NEEDED)
+# =========================
+# uvloop (Linux only)
+uvloop==0.21.0; platform_system != "Windows"

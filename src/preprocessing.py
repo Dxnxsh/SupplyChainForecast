@@ -3,13 +3,27 @@
 import json
 import os
 import re
+import time
 import spacy
+import torch
 from langdetect import detect
 from transformers import pipeline
-from datetime import datetime
 
 # Import default user agent from config
 #from config.config import DEFAULT_USER_AGENT
+
+# --- Performance Configuration ---
+NER_BATCH_SIZE = int(os.getenv("NER_BATCH_SIZE", "32"))
+
+
+def _select_torch_device():
+    """Select the best available torch device for transformers pipeline."""
+    if torch.cuda.is_available():
+        return 0, "cuda"
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return "mps", "mps"
+    return -1, "cpu"
+
 
 # --- Global NLP Model Initialization ---
 # This section loads the models into memory once when the script starts.
@@ -22,9 +36,15 @@ except Exception as e:
     exit()
 
 try:
+    ner_device, ner_device_name = _select_torch_device()
     print("Loading Hugging Face NER model (dbmdz/bert-large-cased-finetuned-conll03-english)...")
-    ner_pipeline = pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english", grouped_entities=True)
-    print("Hugging Face NER model loaded. 🤖")
+    ner_pipeline = pipeline(
+        "ner",
+        model="dbmdz/bert-large-cased-finetuned-conll03-english",
+        grouped_entities=True,
+        device=ner_device
+    )
+    print(f"Hugging Face NER model loaded on {ner_device_name.upper()} with batch size {NER_BATCH_SIZE}. 🤖")
 except Exception as e:
     print(f"❌ Error loading Hugging Face NER model: {e}")
     print("Check internet connection and ensure `transformers` and `torch` are installed.")
@@ -147,25 +167,39 @@ def detect_potential_events(text):
             detected_events.append(event)
     return list(set(detected_events))
 
-def extract_locations(text):
-    """Extracts location entities using the pre-trained NER model."""
-    try:
-        entities = ner_pipeline(text)
-        locations = [entity['word'] for entity in entities if entity['entity_group'] == 'LOC']
-        return list(set(locations))
-    except Exception:
+def extract_locations_batch(texts):
+    """Extract location entities for a list of texts using batched inference."""
+    if not texts:
         return []
+    try:
+        predictions = ner_pipeline(texts, batch_size=NER_BATCH_SIZE)
+        all_locations = []
+        for entities in predictions:
+            locations = [entity['word'] for entity in entities if entity.get('entity_group') == 'LOC']
+            all_locations.append(list(set(locations)))
+        return all_locations
+    except Exception:
+        return [[] for _ in texts]
 
 # --- Main Orchestration Function ---
 
 def process_all_data():
     """Main function to run the full preprocessing pipeline."""
+    total_start = time.perf_counter()
+    load_start = time.perf_counter()
     raw_entries = load_raw_data(directory="data/raw/web_scrape")
+    load_elapsed = time.perf_counter() - load_start
     all_processed_events = []
+    docs_processed = 0
+    english_docs = 0
+    candidate_paragraphs = 0
+    ner_elapsed_total = 0.0
 
+    processing_start = time.perf_counter()
     for i, raw_entry in enumerate(raw_entries):
         if i % 100 == 0:
             print(f"🔄 Processing document {i+1}/{len(raw_entries)}...")
+        docs_processed += 1
 
         article_metadata = parse_entry_metadata(raw_entry)
         full_text = article_metadata.get('original_text', '')
@@ -176,15 +210,27 @@ def process_all_data():
 
         if not paragraphs: continue
 
+        article_lang = detect_language(full_text)
+        if article_lang != 'en':
+            continue
+        english_docs += 1
+
+        paragraph_candidates = []
         for j, para_text in enumerate(paragraphs):
             if len(para_text) < 20: continue
 
-            lang = detect_language(para_text)
-            if lang != 'en': continue
-
             potential_events = detect_potential_events(para_text)
-            extracted_locations = extract_locations(para_text)
+            if potential_events:
+                paragraph_candidates.append((j, para_text, potential_events))
+        candidate_paragraphs += len(paragraph_candidates)
 
+        batched_texts = [item[1] for item in paragraph_candidates]
+        ner_start = time.perf_counter()
+        extracted_locations_batch = extract_locations_batch(batched_texts)
+        ner_elapsed_total += time.perf_counter() - ner_start
+
+        for idx, (j, para_text, potential_events) in enumerate(paragraph_candidates):
+            extracted_locations = extracted_locations_batch[idx] if idx < len(extracted_locations_batch) else []
             if potential_events or extracted_locations:
                 all_processed_events.append({
                     'article_url': article_metadata['url'],
@@ -192,22 +238,38 @@ def process_all_data():
                     'article_title': article_metadata['title'],
                     'article_timestamp': article_metadata['timestamp'],
                     'event_text_segment': para_text,
-                    'detected_language': lang,
+                    'detected_language': article_lang,
                     'potential_event_types': potential_events,
                     'extracted_locations': extracted_locations,
                     'paragraph_id': j
                 })
+    processing_elapsed = time.perf_counter() - processing_start
 
     output_dir = "data/processed"
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "processed_events.jsonl")
 
+    write_start = time.perf_counter()
     with open(output_path, 'w', encoding='utf-8') as f:
         for entry in all_processed_events:
             json.dump(entry, f, ensure_ascii=False)
             f.write('\n')
+    write_elapsed = time.perf_counter() - write_start
+    total_elapsed = time.perf_counter() - total_start
 
     print(f"\n✅ Preprocessing complete. Saved {len(all_processed_events)} granular event entries to {output_path}")
+    print("\n⏱️ Timing Summary")
+    print(f"   Data load: {load_elapsed:.2f}s")
+    print(f"   Processing (incl. language + keyword + NER): {processing_elapsed:.2f}s")
+    print(f"   Batched NER only: {ner_elapsed_total:.2f}s")
+    print(f"   Output write: {write_elapsed:.2f}s")
+    print(f"   Total: {total_elapsed:.2f}s")
+    print("\n📊 Throughput Summary")
+    print(f"   Documents seen: {docs_processed}")
+    print(f"   English documents: {english_docs}")
+    print(f"   Candidate paragraphs sent to NER: {candidate_paragraphs}")
+    if ner_elapsed_total > 0:
+        print(f"   NER paragraphs/sec: {candidate_paragraphs / ner_elapsed_total:.2f}")
 
 if __name__ == "__main__":
     process_all_data()

@@ -43,6 +43,13 @@ SUSPICIOUS_NON_SUPPLY_CHAIN_CONTEXT = [
     'art', 'arts', 'music', 'film', 'movie', 'book', 'literary', 'shakespeare'
 ]
 
+DIRECT_DISRUPTION_KEYWORDS = [
+    'strike', 'walkout', 'shutdown', 'closed', 'halted', 'delay', 'delays', 'fire',
+    'explosion', 'spill', 'outage', 'shortage', 'blockade', 'embargo', 'sanction',
+    'tariff', 'hack', 'cyberattack', 'ransomware', 'breach', 'earthquake', 'flood',
+    'storm', 'hurricane', 'typhoon', 'wildfire', 'accident', 'disruption', 'recall'
+]
+
 
 def _contains_keyword(text, keyword):
     if ' ' in keyword:
@@ -74,15 +81,20 @@ def is_irrelevant_speculation_or_opinion(event_text_segment, article_title):
         
     return False
 
-def has_supply_chain_context(event_text_segment):
+def has_supply_chain_context(event_text_segment, article_title=""):
     """
     Checks if the article has strong enough keywords to be considered supply chain relevant.
     This acts as a basic filter to reduce noise before detailed risk scoring.
     """
-    text_lower = event_text_segment.lower()
+    text_lower = f"{article_title} {event_text_segment}".lower().strip()
     if any(_contains_keyword(text_lower, keyword) for keyword in SUPPLY_CHAIN_PRIMARY_KEYWORDS):
         return True
     return False
+
+
+def has_direct_disruption_signal(event_text_segment, article_title=""):
+    text_lower = f"{article_title} {event_text_segment}".lower().strip()
+    return any(_contains_keyword(text_lower, keyword) for keyword in DIRECT_DISRUPTION_KEYWORDS)
 
 # --- Core Filtering Logic ---
 def load_preprocessed_data(filepath="data/processed/processed_events.jsonl"):
@@ -114,10 +126,11 @@ def filter_events(preprocessed_articles):
             # print(f"  Skipping (no event type): {article_title[:70]}...")
             continue
 
-        # Filter 2: Must contain supply chain context keywords
-        if not has_supply_chain_context(text_segment):
-            # print(f"  Skipping (no SC context): {article_title[:70]}...")
-            continue
+        # Filter 2: Must contain supply chain context, or a direct disruption signal paired with a real event type.
+        if not has_supply_chain_context(text_segment, article_title):
+            if not (potential_event_types and has_direct_disruption_signal(text_segment, article_title)):
+                # print(f"  Skipping (no SC context): {article_title[:70]}...")
+                continue
 
         # Filter 3: New - Must NOT be overly speculative or opinionated
         if is_irrelevant_speculation_or_opinion(text_segment, article_title):

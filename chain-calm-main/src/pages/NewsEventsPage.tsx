@@ -8,6 +8,9 @@ import { mapSupplier } from '@/lib/dataMappers';
 import { formatBackendDate } from '@/lib/dateUtils';
 
 export default function NewsEventsPage() {
+  const scoreBadgeClass = 'bg-primary/15 text-primary border-0';
+  const subtleBadgeClass = 'bg-secondary/60 text-secondary-foreground border-0';
+
   const suppliersQuery = useQuery({
     queryKey: ['suppliers'],
     queryFn: api.getSuppliers,
@@ -93,9 +96,15 @@ export default function NewsEventsPage() {
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-2 text-right">
-                        <Badge className="bg-primary/15 text-primary border-0">Risk {Math.round(event.risk_score ?? 0)}%</Badge>
+                        <Badge className={scoreBadgeClass}>Risk {Math.round(event.risk_score ?? 0)}%</Badge>
                         {typeof event.impact_score === 'number' && (
                           <Badge className="bg-risk-medium/15 text-risk-medium border-0">Impact {Math.round(event.impact_score)}%</Badge>
+                        )}
+                        {typeof event.risk_relevance_score === 'number' && (
+                          <Badge className={subtleBadgeClass}>Relevance {Math.round(event.risk_relevance_score)}%</Badge>
+                        )}
+                        {typeof event.risk_severity_score === 'number' && (
+                          <Badge className={subtleBadgeClass}>Severity {Math.round(event.risk_severity_score)}%</Badge>
                         )}
                         {event.article_url && event.article_url !== '#' && (
                           <a href={event.article_url} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground">
@@ -144,6 +153,20 @@ export default function NewsEventsPage() {
                         Risk {Math.round(event.risk_score ?? 0)}%
                       </Badge>
                     </div>
+                    {(typeof event.risk_relevance_score === 'number' || typeof event.risk_severity_score === 'number') && (
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {typeof event.risk_relevance_score === 'number' && (
+                          <Badge className="bg-secondary/60 text-secondary-foreground border-0 text-xs">
+                            Relevance {Math.round(event.risk_relevance_score)}%
+                          </Badge>
+                        )}
+                        {typeof event.risk_severity_score === 'number' && (
+                          <Badge className="bg-secondary/60 text-secondary-foreground border-0 text-xs">
+                            Severity {Math.round(event.risk_severity_score)}%
+                          </Badge>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         {supplier && (

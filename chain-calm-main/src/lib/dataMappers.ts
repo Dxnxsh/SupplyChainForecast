@@ -54,6 +54,8 @@ export const mapNewsArticle = (event: BackendEvent): NewsArticle => {
     url: event.article_url || '#',
     matchedNode: event.matched_node ?? undefined,
     riskScore: event.risk_score ?? undefined,
+    riskRelevanceScore: event.risk_relevance_score ?? undefined,
+    riskSeverityScore: event.risk_severity_score ?? undefined,
     impactScore: event.impact_score ?? undefined,
     isPredictive: event.temporal_info?.is_predictive,
     predictedDate: event.temporal_info?.predicted_date,
@@ -62,7 +64,7 @@ export const mapNewsArticle = (event: BackendEvent): NewsArticle => {
 };
 
 export const mapDisruptionEvent = (event: BackendEvent): DisruptionEvent => {
-  const severityScore = event.impact_score ?? event.risk_score ?? 0;
+  const severityScore = event.impact_score ?? event.risk_severity_score ?? event.risk_score ?? 0;
   const eventType = event.potential_event_types?.[0]?.replace(/_/g, ' ');
   const title =
     event.article_title ??
@@ -77,6 +79,9 @@ export const mapDisruptionEvent = (event: BackendEvent): DisruptionEvent => {
     description: event.event_text_segment ?? 'No additional details provided.',
     date: dateOnly(event.temporal_info?.predicted_date ?? event.article_timestamp),
     severity: riskLevelFromScore(severityScore),
+    riskScore: event.risk_score ?? undefined,
+    riskRelevanceScore: event.risk_relevance_score ?? undefined,
+    riskSeverityScore: event.risk_severity_score ?? undefined,
     isPredictive: event.temporal_info?.is_predictive,
     predictedDate: event.temporal_info?.predicted_date,
   };

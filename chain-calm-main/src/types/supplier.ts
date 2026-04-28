@@ -17,6 +17,9 @@ export interface DisruptionEvent {
   description: string;
   date: string;
   severity: RiskLevel;
+  riskScore?: number;
+  riskRelevanceScore?: number;
+  riskSeverityScore?: number;
   isPredictive?: boolean;
   predictedDate?: string;
 }
@@ -29,6 +32,8 @@ export interface NewsArticle {
   url: string;
   matchedNode?: string;
   riskScore?: number;
+  riskRelevanceScore?: number;
+  riskSeverityScore?: number;
   impactScore?: number;
   isPredictive?: boolean;
   predictedDate?: string;

@@ -21,6 +21,8 @@ export interface BackendEvent {
   extracted_locations?: string[] | null;
   matched_node?: string | null;
   risk_score?: number | null;
+  risk_relevance_score?: number | null;
+  risk_severity_score?: number | null;
   impact_score?: number | null;
   latitude?: number | null;
   longitude?: number | null;

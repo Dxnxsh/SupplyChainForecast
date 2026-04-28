@@ -183,10 +183,10 @@ def detect_language(text):
     except:
         return "unknown"
 
-def detect_potential_events(text):
+def detect_potential_events(text, title=""):
     """Identifies potential event categories based on keyword matching."""
     detected_events = []
-    lower_text = text.lower()
+    lower_text = f"{title} {text}".lower().strip()
     for event, keywords in EVENT_KEYWORDS.items():
         if any(_keyword_matches(lower_text, keyword) for keyword in keywords):
             detected_events.append(event)
@@ -285,7 +285,7 @@ def process_all_data():
         for j, para_text in enumerate(paragraphs):
             if len(para_text) < 20: continue
 
-            potential_events = detect_potential_events(para_text)
+            potential_events = detect_potential_events(para_text, article_metadata['title'])
             if potential_events:
                 paragraph_candidates.append((j, para_text, potential_events))
         candidate_paragraphs += len(paragraph_candidates)

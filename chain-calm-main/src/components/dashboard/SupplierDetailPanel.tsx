@@ -102,6 +102,25 @@ export function SupplierDetailPanel({
                       <RiskBadge level={event.severity} size="sm" showLabel={false} />
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">{event.description}</p>
+                    {(typeof event.riskScore === 'number' || typeof event.riskRelevanceScore === 'number' || typeof event.riskSeverityScore === 'number') && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {typeof event.riskScore === 'number' && (
+                          <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
+                            Risk {Math.round(event.riskScore)}%
+                          </span>
+                        )}
+                        {typeof event.riskRelevanceScore === 'number' && (
+                          <span className="inline-flex items-center rounded-full bg-secondary/70 px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+                            Relevance {Math.round(event.riskRelevanceScore)}%
+                          </span>
+                        )}
+                        {typeof event.riskSeverityScore === 'number' && (
+                          <span className="inline-flex items-center rounded-full bg-secondary/70 px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+                            Severity {Math.round(event.riskSeverityScore)}%
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
                       <Calendar className="w-3 h-3" />
                       {event.predictedDate ?? event.date}

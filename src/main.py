@@ -65,6 +65,8 @@ class Event(BaseModel):
     extracted_locations: Optional[List[str]] = None
     matched_node: Optional[str] = None
     risk_score: Optional[float] = None
+    risk_relevance_score: Optional[float] = None
+    risk_severity_score: Optional[float] = None
     impact_score: Optional[float] = None # NEW: Added impact_score
     latitude: Optional[float] = None
     longitude: Optional[float] = None

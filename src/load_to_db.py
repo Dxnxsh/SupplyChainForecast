@@ -60,6 +60,8 @@ def create_tables(engine):
         Column('extracted_locations', JSONB),
         Column('matched_node', String),
         Column('risk_score', Float),
+        Column('risk_relevance_score', Float),
+        Column('risk_severity_score', Float),
         Column('latitude', Float),
         Column('longitude', Float),
         Column('temporal_info', JSONB),  # For forecasted events
@@ -90,6 +92,21 @@ def ensure_events_ml_columns(engine):
         print("✅ ML risk columns verified on events table.")
     except SQLAlchemyError as e:
         print(f"⚠️ Could not ensure ML columns (may be non-Postgres): {e}")
+
+
+def ensure_events_risk_columns(engine):
+    """Add split risk scoring columns to events if missing."""
+    stmts = [
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS risk_relevance_score DOUBLE PRECISION;",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS risk_severity_score DOUBLE PRECISION;",
+    ]
+    try:
+        with engine.begin() as connection:
+            for stmt in stmts:
+                connection.execute(text(stmt))
+        print("✅ Risk score columns verified on events table.")
+    except SQLAlchemyError as e:
+        print(f"⚠️ Could not ensure risk columns (may be non-Postgres): {e}")
 
 
 def load_geocoded_data(filepath="data/processed/temporal_enriched_events.jsonl"):
@@ -204,6 +221,7 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
     if not events_data:
         return 0
     ensure_events_ml_columns(engine)
+    ensure_events_risk_columns(engine)
     insert_count = 0
     with engine.connect() as connection:
         print(f"Upserting {len(events_data)} event(s)...")
@@ -218,12 +236,12 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
             stmt = text("""
                 INSERT INTO events (
                     article_url, article_source, article_title, article_timestamp, event_text_segment,
-                    potential_event_types, extracted_locations, matched_node, risk_score, latitude, longitude,
+                    potential_event_types, extracted_locations, matched_node, risk_score, risk_relevance_score, risk_severity_score, latitude, longitude,
                     temporal_info, ml_risk_label, ml_risk_confidence, ml_risk_probabilities
                 )
                 VALUES (
                     :article_url, :article_source, :article_title, :article_timestamp, :event_text_segment,
-                    :potential_event_types, :extracted_locations, :matched_node, :risk_score, :latitude, :longitude,
+                    :potential_event_types, :extracted_locations, :matched_node, :risk_score, :risk_relevance_score, :risk_severity_score, :latitude, :longitude,
                     :temporal_info, :ml_risk_label, :ml_risk_confidence, :ml_risk_probabilities
                 )
                 ON CONFLICT (article_url) DO UPDATE SET
@@ -235,6 +253,8 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                     extracted_locations = COALESCE(EXCLUDED.extracted_locations, events.extracted_locations),
                     matched_node = COALESCE(EXCLUDED.matched_node, events.matched_node),
                     risk_score = COALESCE(EXCLUDED.risk_score, events.risk_score),
+                    risk_relevance_score = COALESCE(EXCLUDED.risk_relevance_score, events.risk_relevance_score),
+                    risk_severity_score = COALESCE(EXCLUDED.risk_severity_score, events.risk_severity_score),
                     latitude = COALESCE(EXCLUDED.latitude, events.latitude),
                     longitude = COALESCE(EXCLUDED.longitude, events.longitude),
                     temporal_info = COALESCE(EXCLUDED.temporal_info, events.temporal_info),
@@ -253,6 +273,8 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                     "extracted_locations": extracted_locations_json,
                     "matched_node": event.get('matched_node'),
                     "risk_score": event.get('risk_score'),
+                    "risk_relevance_score": event.get('risk_relevance_score'),
+                    "risk_severity_score": event.get('risk_severity_score'),
                     "latitude": event.get('latitude'),
                     "longitude": event.get('longitude'),
                     "temporal_info": temporal_info_json,
@@ -274,6 +296,7 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
 def populate_database(engine, events_data):
     """Populates the 'suppliers' and 'events' tables with data."""
     ensure_events_ml_columns(engine)
+    ensure_events_risk_columns(engine)
     with engine.connect() as connection:
         print("Populating 'suppliers' table with criticality...")
         for node_name, details in SUPPLIER_NODES.items():

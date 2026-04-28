@@ -6,5 +6,57 @@
   {
     "url": "https://www.freightwaves.com/news/feed/",
     "source": "FreightWaves"
+  },
+  {
+    "url": "https://feeds.reuters.com/reuters/businessNews",
+    "source": "Reuters Business"
+  },
+  {
+    "url": "https://feeds.bloomberg.com/markets/news.rss",
+    "source": "Bloomberg Markets"
+  },
+  {
+    "url": "https://feeds.bbc.co.uk/news/world/rss.xml",
+    "source": "BBC World News"
+  },
+  {
+    "url": "https://apnews.com/hub/breaking-news?_suid=rss",
+    "source": "AP Breaking News"
+  },
+  {
+    "url": "https://www.joc.com/rss/joc-top-news",
+    "source": "JOC.com - Port & Logistics"
+  },
+  {
+    "url": "https://www.labornotes.org/feed",
+    "source": "Labor Notes"
+  },
+  {
+    "url": "https://www.cisa.gov/news-events/news/rss.xml",
+    "source": "CISA - Cyber Alerts"
+  },
+  {
+    "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+    "source": "USGS Earthquakes"
+  },
+  {
+    "url": "https://reliefweb.int/updates?format=rss&search=natural%20disaster",
+    "source": "ReliefWeb Disasters"
+  },
+  {
+    "url": "https://www.taiwannews.com.tw/feed/",
+    "source": "Taiwan News"
+  },
+  {
+    "url": "https://english.yonhapnews.co.kr/rss/news.xml",
+    "source": "Yonhap News - Korea"
+  },
+  {
+    "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "source": "CNBC Supply Chain"
+  },
+  {
+    "url": "https://feeds.bloomberg.com/logistics/news.rss",
+    "source": "Bloomberg Supply Chain"
   }
 ]

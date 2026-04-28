@@ -38,6 +38,17 @@ TITLE_URL_NEGATIVE_FILTERS = [
     'review', 'podcast', 'video', 'newsletter', 'faq', 'guide', 'blog', 'column'
 ]
 
+SUSPICIOUS_NON_SUPPLY_CHAIN_CONTEXT = [
+    'festival', 'theatre', 'theater', 'play', 'poem', 'poetry', 'novel', 'fiction',
+    'art', 'arts', 'music', 'film', 'movie', 'book', 'literary', 'shakespeare'
+]
+
+
+def _contains_keyword(text, keyword):
+    if ' ' in keyword:
+        return keyword in text
+    return re.search(rf'\b{re.escape(keyword)}\b', text) is not None
+
 
 # --- Helper Functions ---
 def is_irrelevant_speculation_or_opinion(event_text_segment, article_title):
@@ -55,6 +66,11 @@ def is_irrelevant_speculation_or_opinion(event_text_segment, article_title):
     # Check for negative filters in the title/URL (less common but effective for specific sources)
     if any(keyword in title_lower for keyword in TITLE_URL_NEGATIVE_FILTERS):
         return True
+
+    if any(keyword in text_lower for keyword in SUSPICIOUS_NON_SUPPLY_CHAIN_CONTEXT) and not any(
+        keyword in text_lower for keyword in ('factory fire', 'port congestion', 'shipping', 'freight', 'cargo', 'shutdown', 'strike')
+    ):
+        return True
         
     return False
 
@@ -64,7 +80,7 @@ def has_supply_chain_context(event_text_segment):
     This acts as a basic filter to reduce noise before detailed risk scoring.
     """
     text_lower = event_text_segment.lower()
-    if any(keyword in text_lower for keyword in SUPPLY_CHAIN_PRIMARY_KEYWORDS):
+    if any(_contains_keyword(text_lower, keyword) for keyword in SUPPLY_CHAIN_PRIMARY_KEYWORDS):
         return True
     return False
 

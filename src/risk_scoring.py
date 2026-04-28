@@ -28,6 +28,20 @@ SUPPLY_CHAIN_CONTEXT_KEYWORDS = [
     'semiconductor', 'chip', 'battery', 'electric vehicle' # Added more specific industry terms
 ]
 
+CONCRETE_DISRUPTION_KEYWORDS = [
+    'strike', 'walkout', 'shutdown', 'closed', 'halted', 'delay', 'delays', 'fire',
+    'explosion', 'spill', 'outage', 'shortage', 'blockade', 'embargo', 'sanction',
+    'tariff', 'hack', 'cyberattack', 'ransomware', 'breach', 'earthquake', 'flood',
+    'storm', 'hurricane', 'typhoon', 'wildfire', 'accident', 'disruption', 'recall',
+    'port congestion', 'port closure', 'trade war', 'export ban', 'import restrictions'
+]
+
+NON_SUPPLY_CHAIN_CONTENT_KEYWORDS = [
+    'festival', 'theatre', 'theater', 'play', 'poetry', 'poem', 'novel', 'art',
+    'music', 'film', 'movie', 'book', 'review', 'commentary', 'opinion', 'literary',
+    'shakespeare'
+]
+
 # Keywords that suggest the article is about commentary or future possibility, not direct action
 COMMENTARY_VERBS = [
     'says', 'said', 'thinks', 'believes', 'argues', 'suggests', 'warns',
@@ -61,8 +75,8 @@ def get_sentiment_modifier(text):
 def get_urgency_modifier(text):
     """Returns a modifier based on urgency keywords. High urgency boosts risk, low reduces it."""
     lower_text = text.lower()
-    if any(keyword in lower_text for keyword in URGENCY_KEYWORDS['high']): return 1.5
-    if any(keyword in lower_text for keyword in URGENCY_KEYWORDS['medium']): return 1.2
+    if any(keyword in lower_text for keyword in URGENCY_KEYWORDS['high']): return 1.25
+    if any(keyword in lower_text for keyword in URGENCY_KEYWORDS['medium']): return 1.1
     if any(keyword in lower_text for keyword in URGENCY_KEYWORDS['low']): return 0.7
     return 1.0
 
@@ -78,10 +92,24 @@ def load_filtered_data(filepath="data/processed/filtered_events.jsonl"):
 def calculate_risk_score(event):
     """Calculates an enhanced risk score incorporating context, sentiment, and urgency."""
     event_text = event.get('event_text_segment', '').lower()
+    article_title = event.get('article_title', '').lower()
     event_types = event.get('potential_event_types', [])
+    combined_text = f"{article_title} {event_text}".strip()
+
+    if not event_text:
+        return 0.0
+
+    if any(keyword in combined_text for keyword in NON_SUPPLY_CHAIN_CONTENT_KEYWORDS) and not any(
+        keyword in combined_text for keyword in CONCRETE_DISRUPTION_KEYWORDS
+    ):
+        return 0.0
 
     # 1. Context Check: Must be related to supply chain to have any score
-    if not any(keyword in event_text for keyword in SUPPLY_CHAIN_CONTEXT_KEYWORDS):
+    if not any(keyword in combined_text for keyword in SUPPLY_CHAIN_CONTEXT_KEYWORDS):
+        return 0.0
+
+    # 1b. Require a concrete disruption signal, not just a generic supply-chain noun.
+    if not any(keyword in combined_text for keyword in CONCRETE_DISRUPTION_KEYWORDS):
         return 0.0
 
     # 2. Base Score from Event Types (sum of weights for all identified types)

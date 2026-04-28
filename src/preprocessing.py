@@ -79,6 +79,13 @@ EVENT_KEYWORDS = {
     'Cyber_Attack': ['cyberattack', 'hack', 'ransomware', 'data breach', 'system outage']
 }
 
+
+def _keyword_matches(text, keyword):
+    """Match phrases loosely and single words on boundaries."""
+    if ' ' in keyword:
+        return keyword in text
+    return re.search(rf'\b{re.escape(keyword)}\b', text) is not None
+
 # --- Core Preprocessing Functions ---
 
 def load_raw_data(directory="data/raw/web_scrape"):
@@ -181,7 +188,7 @@ def detect_potential_events(text):
     detected_events = []
     lower_text = text.lower()
     for event, keywords in EVENT_KEYWORDS.items():
-        if any(keyword in lower_text for keyword in keywords):
+        if any(_keyword_matches(lower_text, keyword) for keyword in keywords):
             detected_events.append(event)
     return list(set(detected_events))
 

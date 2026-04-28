@@ -2,6 +2,7 @@
 
 import json
 import os
+import pickle
 import re
 import time
 import spacy
@@ -14,6 +15,7 @@ from transformers import pipeline
 
 # --- Performance Configuration ---
 NER_BATCH_SIZE = int(os.getenv("NER_BATCH_SIZE", "32"))
+ML_CLASSIFIER_PATH = os.getenv("ML_CLASSIFIER_PATH", "model_training/classifier.pkl")
 
 
 def _select_torch_device():
@@ -23,6 +25,22 @@ def _select_torch_device():
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps", "mps"
     return -1, "cpu"
+
+
+def load_ml_classifier(model_path=ML_CLASSIFIER_PATH):
+    """Load the trained ML classifier tuple (vectorizer, model)."""
+    if not os.path.exists(model_path):
+        print(f"⚠️ ML classifier not found at {model_path}. Continuing without ML labels.")
+        return None, None
+    try:
+        with open(model_path, "rb") as f:
+            vectorizer, model = pickle.load(f)
+        print(f"✅ ML risk classifier loaded from {model_path}")
+        return vectorizer, model
+    except Exception as e:
+        print(f"⚠️ Failed to load ML classifier: {e}")
+        print("   Continuing without ML risk labels.")
+        return None, None
 
 
 # --- Global NLP Model Initialization ---
@@ -181,6 +199,45 @@ def extract_locations_batch(texts):
     except Exception:
         return [[] for _ in texts]
 
+
+def predict_ml_risk_batch(headlines, texts, vectorizer, model):
+    """Predict ML risk labels/probabilities for headline+text inputs."""
+    if not texts:
+        return []
+    if vectorizer is None or model is None:
+        return [
+            {
+                "ml_risk_label": None,
+                "ml_risk_confidence": None,
+                "ml_risk_probabilities": None,
+            }
+            for _ in texts
+        ]
+    try:
+        model_inputs = [f"{h} {t[:300]}" for h, t in zip(headlines, texts)]
+        X = vectorizer.transform(model_inputs)
+        preds = model.predict(X)
+        probs = model.predict_proba(X)
+        classes = list(model.classes_)
+        outputs = []
+        for pred, prob in zip(preds, probs):
+            prob_map = {c: round(float(p), 4) for c, p in zip(classes, prob)}
+            outputs.append({
+                "ml_risk_label": str(pred),
+                "ml_risk_confidence": round(max(prob_map.values()), 4) if prob_map else None,
+                "ml_risk_probabilities": prob_map
+            })
+        return outputs
+    except Exception:
+        return [
+            {
+                "ml_risk_label": None,
+                "ml_risk_confidence": None,
+                "ml_risk_probabilities": None,
+            }
+            for _ in texts
+        ]
+
 # --- Main Orchestration Function ---
 
 def process_all_data():
@@ -189,11 +246,13 @@ def process_all_data():
     load_start = time.perf_counter()
     raw_entries = load_raw_data(directory="data/raw/web_scrape")
     load_elapsed = time.perf_counter() - load_start
+    ml_vectorizer, ml_model = load_ml_classifier()
     all_processed_events = []
     docs_processed = 0
     english_docs = 0
     candidate_paragraphs = 0
     ner_elapsed_total = 0.0
+    ml_elapsed_total = 0.0
 
     processing_start = time.perf_counter()
     for i, raw_entry in enumerate(raw_entries):
@@ -225,12 +284,23 @@ def process_all_data():
         candidate_paragraphs += len(paragraph_candidates)
 
         batched_texts = [item[1] for item in paragraph_candidates]
+        batched_headlines = [article_metadata['title']] * len(paragraph_candidates)
         ner_start = time.perf_counter()
         extracted_locations_batch = extract_locations_batch(batched_texts)
         ner_elapsed_total += time.perf_counter() - ner_start
+        ml_start = time.perf_counter()
+        ml_predictions = predict_ml_risk_batch(
+            batched_headlines, batched_texts, ml_vectorizer, ml_model
+        )
+        ml_elapsed_total += time.perf_counter() - ml_start
 
         for idx, (j, para_text, potential_events) in enumerate(paragraph_candidates):
             extracted_locations = extracted_locations_batch[idx] if idx < len(extracted_locations_batch) else []
+            ml_info = ml_predictions[idx] if idx < len(ml_predictions) else {
+                "ml_risk_label": None,
+                "ml_risk_confidence": None,
+                "ml_risk_probabilities": None,
+            }
             if potential_events or extracted_locations:
                 all_processed_events.append({
                     'article_url': article_metadata['url'],
@@ -241,6 +311,9 @@ def process_all_data():
                     'detected_language': article_lang,
                     'potential_event_types': potential_events,
                     'extracted_locations': extracted_locations,
+                    'ml_risk_label': ml_info["ml_risk_label"],
+                    'ml_risk_confidence': ml_info["ml_risk_confidence"],
+                    'ml_risk_probabilities': ml_info["ml_risk_probabilities"],
                     'paragraph_id': j
                 })
     processing_elapsed = time.perf_counter() - processing_start
@@ -262,6 +335,7 @@ def process_all_data():
     print(f"   Data load: {load_elapsed:.2f}s")
     print(f"   Processing (incl. language + keyword + NER): {processing_elapsed:.2f}s")
     print(f"   Batched NER only: {ner_elapsed_total:.2f}s")
+    print(f"   Batched ML inference only: {ml_elapsed_total:.2f}s")
     print(f"   Output write: {write_elapsed:.2f}s")
     print(f"   Total: {total_elapsed:.2f}s")
     print("\n📊 Throughput Summary")
@@ -270,6 +344,8 @@ def process_all_data():
     print(f"   Candidate paragraphs sent to NER: {candidate_paragraphs}")
     if ner_elapsed_total > 0:
         print(f"   NER paragraphs/sec: {candidate_paragraphs / ner_elapsed_total:.2f}")
+    if ml_elapsed_total > 0:
+        print(f"   ML inference paragraphs/sec: {candidate_paragraphs / ml_elapsed_total:.2f}")
 
 if __name__ == "__main__":
     process_all_data()

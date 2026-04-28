@@ -62,7 +62,10 @@ def create_tables(engine):
         Column('risk_score', Float),
         Column('latitude', Float),
         Column('longitude', Float),
-        Column('temporal_info', JSONB)  # NEW: For forecasted events
+        Column('temporal_info', JSONB),  # For forecasted events
+        Column('ml_risk_label', String),
+        Column('ml_risk_confidence', Float),
+        Column('ml_risk_probabilities', JSONB),
     )
 
     try:
@@ -71,6 +74,23 @@ def create_tables(engine):
         print("✅ Tables checked/created successfully.")
     except SQLAlchemyError as e:
         print(f"❌ Error creating tables: {e}")
+
+
+def ensure_events_ml_columns(engine):
+    """Add ML risk columns to events if missing (existing DBs created before ML fields)."""
+    stmts = [
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS ml_risk_label VARCHAR(16);",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS ml_risk_confidence DOUBLE PRECISION;",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS ml_risk_probabilities JSONB;",
+    ]
+    try:
+        with engine.begin() as connection:
+            for stmt in stmts:
+                connection.execute(text(stmt))
+        print("✅ ML risk columns verified on events table.")
+    except SQLAlchemyError as e:
+        print(f"⚠️ Could not ensure ML columns (may be non-Postgres): {e}")
+
 
 def load_geocoded_data(filepath="data/processed/temporal_enriched_events.jsonl"):
     """Loads event data from a JSONL file, preferring temporal enriched data."""
@@ -148,10 +168,113 @@ def parse_timestamp_robust(timestamp_str):
     print(f"⚠️ Warning: Could not parse timestamp '{timestamp_str}' after trying all known formats.")
     return None # Return None if no format matches
 
+
+def _recompute_supplier_risk_scores(connection):
+    print("Recomputing 'current_risk_score' for suppliers from recent event risk data...")
+    update_risk_stmt = text("""
+        UPDATE suppliers AS s
+        SET current_risk_score = COALESCE(
+            (
+                SELECT ROUND(AVG(e.risk_score)::numeric, 2)
+                FROM events AS e
+                WHERE e.matched_node = s.node_name
+                  AND e.risk_score IS NOT NULL
+                  AND e.risk_score > 0
+                  AND e.article_timestamp >= NOW() - INTERVAL '30 days'
+            ),
+            (
+                SELECT ROUND(AVG(e.risk_score)::numeric, 2)
+                FROM events AS e
+                WHERE e.matched_node = s.node_name
+                  AND e.risk_score IS NOT NULL
+                  AND e.risk_score > 0
+            ),
+            0.0
+        );
+    """)
+    connection.execute(update_risk_stmt)
+    print("✅ Supplier risk scores updated from recent events.")
+
+
+def upsert_events(engine, events_data, recompute_supplier_scores=True):
+    """
+    Upsert event rows only. Ensures ML columns exist on PostgreSQL.
+    Used by full pipeline load and by RSS ingestion.
+    """
+    if not events_data:
+        return 0
+    ensure_events_ml_columns(engine)
+    insert_count = 0
+    with engine.connect() as connection:
+        print(f"Upserting {len(events_data)} event(s)...")
+        for event in events_data:
+            parsed_timestamp = parse_timestamp_robust(event.get('article_timestamp'))
+            potential_event_types_json = json.dumps(event.get('potential_event_types')) if event.get('potential_event_types') is not None else '[]'
+            extracted_locations_json = json.dumps(event.get('extracted_locations')) if event.get('extracted_locations') is not None else '[]'
+            temporal_info_json = json.dumps(event.get('temporal_info')) if event.get('temporal_info') is not None else None
+            ml_probs = event.get('ml_risk_probabilities')
+            ml_risk_probabilities_json = json.dumps(ml_probs) if ml_probs is not None else None
+
+            stmt = text("""
+                INSERT INTO events (
+                    article_url, article_source, article_title, article_timestamp, event_text_segment,
+                    potential_event_types, extracted_locations, matched_node, risk_score, latitude, longitude,
+                    temporal_info, ml_risk_label, ml_risk_confidence, ml_risk_probabilities
+                )
+                VALUES (
+                    :article_url, :article_source, :article_title, :article_timestamp, :event_text_segment,
+                    :potential_event_types, :extracted_locations, :matched_node, :risk_score, :latitude, :longitude,
+                    :temporal_info, :ml_risk_label, :ml_risk_confidence, :ml_risk_probabilities
+                )
+                ON CONFLICT (article_url) DO UPDATE SET
+                    article_source = COALESCE(EXCLUDED.article_source, events.article_source),
+                    article_title = COALESCE(EXCLUDED.article_title, events.article_title),
+                    article_timestamp = COALESCE(EXCLUDED.article_timestamp, events.article_timestamp),
+                    event_text_segment = COALESCE(EXCLUDED.event_text_segment, events.event_text_segment),
+                    potential_event_types = COALESCE(EXCLUDED.potential_event_types, events.potential_event_types),
+                    extracted_locations = COALESCE(EXCLUDED.extracted_locations, events.extracted_locations),
+                    matched_node = COALESCE(EXCLUDED.matched_node, events.matched_node),
+                    risk_score = COALESCE(EXCLUDED.risk_score, events.risk_score),
+                    latitude = COALESCE(EXCLUDED.latitude, events.latitude),
+                    longitude = COALESCE(EXCLUDED.longitude, events.longitude),
+                    temporal_info = COALESCE(EXCLUDED.temporal_info, events.temporal_info),
+                    ml_risk_label = COALESCE(EXCLUDED.ml_risk_label, events.ml_risk_label),
+                    ml_risk_confidence = COALESCE(EXCLUDED.ml_risk_confidence, events.ml_risk_confidence),
+                    ml_risk_probabilities = COALESCE(EXCLUDED.ml_risk_probabilities, events.ml_risk_probabilities);
+            """)
+            try:
+                result = connection.execute(stmt, {
+                    "article_url": event.get('article_url'),
+                    "article_source": event.get('article_source'),
+                    "article_title": event.get('article_title'),
+                    "article_timestamp": parsed_timestamp,
+                    "event_text_segment": event.get('event_text_segment'),
+                    "potential_event_types": potential_event_types_json,
+                    "extracted_locations": extracted_locations_json,
+                    "matched_node": event.get('matched_node'),
+                    "risk_score": event.get('risk_score'),
+                    "latitude": event.get('latitude'),
+                    "longitude": event.get('longitude'),
+                    "temporal_info": temporal_info_json,
+                    "ml_risk_label": event.get('ml_risk_label'),
+                    "ml_risk_confidence": event.get('ml_risk_confidence'),
+                    "ml_risk_probabilities": ml_risk_probabilities_json,
+                })
+                if result.rowcount > 0:
+                    insert_count += 1
+            except SQLAlchemyError as e:
+                print(f"⚠️ Warning: Could not insert event {event.get('article_url')}. Error: {e}")
+        if recompute_supplier_scores:
+            _recompute_supplier_risk_scores(connection)
+        connection.commit()
+    print(f"✅ Events upsert complete (rows affected approx): {insert_count}")
+    return insert_count
+
+
 def populate_database(engine, events_data):
     """Populates the 'suppliers' and 'events' tables with data."""
+    ensure_events_ml_columns(engine)
     with engine.connect() as connection:
-        # Populate 'suppliers' table (with criticality and UPSERT logic)
         print("Populating 'suppliers' table with criticality...")
         for node_name, details in SUPPLIER_NODES.items():
             stmt = text("""
@@ -167,87 +290,13 @@ def populate_database(engine, events_data):
         connection.commit()
         print(f"✅ 'suppliers' table populated with {len(SUPPLIER_NODES)} nodes.")
 
-        # Populate 'events' table
-        print("Populating 'events' table...")
-        insert_count = 0
-        for event in events_data:
-            # Use the robust parsing function
-            parsed_timestamp = parse_timestamp_robust(event.get('article_timestamp'))
-
-            # Ensure JSONB fields are properly dumped as JSON strings
-            potential_event_types_json = json.dumps(event.get('potential_event_types')) if event.get('potential_event_types') is not None else '[]'
-            extracted_locations_json = json.dumps(event.get('extracted_locations')) if event.get('extracted_locations') is not None else '[]'
-            temporal_info_json = json.dumps(event.get('temporal_info')) if event.get('temporal_info') is not None else None
-
-            stmt = text("""
-                INSERT INTO events (article_url, article_source, article_title, article_timestamp, event_text_segment, potential_event_types, extracted_locations, matched_node, risk_score, latitude, longitude, temporal_info)
-                VALUES (:article_url, :article_source, :article_title, :article_timestamp, :event_text_segment, :potential_event_types, :extracted_locations, :matched_node, :risk_score, :latitude, :longitude, :temporal_info)
-                ON CONFLICT (article_url) DO UPDATE SET
-                    article_source = COALESCE(EXCLUDED.article_source, events.article_source),
-                    article_title = COALESCE(EXCLUDED.article_title, events.article_title),
-                    article_timestamp = COALESCE(EXCLUDED.article_timestamp, events.article_timestamp),
-                    event_text_segment = COALESCE(EXCLUDED.event_text_segment, events.event_text_segment),
-                    potential_event_types = COALESCE(EXCLUDED.potential_event_types, events.potential_event_types),
-                    extracted_locations = COALESCE(EXCLUDED.extracted_locations, events.extracted_locations),
-                    matched_node = COALESCE(EXCLUDED.matched_node, events.matched_node),
-                    risk_score = COALESCE(EXCLUDED.risk_score, events.risk_score),
-                    latitude = COALESCE(EXCLUDED.latitude, events.latitude),
-                    longitude = COALESCE(EXCLUDED.longitude, events.longitude),
-                    temporal_info = COALESCE(EXCLUDED.temporal_info, events.temporal_info);
-            """)
-            try:
-                result = connection.execute(stmt, {
-                    "article_url": event.get('article_url'),
-                    "article_source": event.get('article_source'),
-                    "article_title": event.get('article_title'),
-                    "article_timestamp": parsed_timestamp, # Use the robustly parsed timestamp
-                    "event_text_segment": event.get('event_text_segment'),
-                    "potential_event_types": potential_event_types_json,
-                    "extracted_locations": extracted_locations_json,
-                    "matched_node": event.get('matched_node'),
-                    "risk_score": event.get('risk_score'),
-                    "latitude": event.get('latitude'),
-                    "longitude": event.get('longitude'),
-                    "temporal_info": temporal_info_json  # NEW: Forecasting data
-                })
-                if result.rowcount > 0:
-                    insert_count += 1
-            except SQLAlchemyError as e:
-                print(f"⚠️ Warning: Could not insert event {event.get('article_url')}. Error: {e}")
-        
-        connection.commit()
-        print(f"✅ 'events' table populated. Inserted {insert_count} new events.")
-
-        print("Recomputing 'current_risk_score' for suppliers from recent event risk data...")
-        update_risk_stmt = text("""
-            UPDATE suppliers AS s
-            SET current_risk_score = COALESCE(
-                (
-                    SELECT ROUND(AVG(e.risk_score)::numeric, 2)
-                    FROM events AS e
-                    WHERE e.matched_node = s.node_name
-                      AND e.risk_score IS NOT NULL
-                      AND e.risk_score > 0
-                      AND e.article_timestamp >= NOW() - INTERVAL '30 days'
-                ),
-                (
-                    SELECT ROUND(AVG(e.risk_score)::numeric, 2)
-                    FROM events AS e
-                    WHERE e.matched_node = s.node_name
-                      AND e.risk_score IS NOT NULL
-                      AND e.risk_score > 0
-                ),
-                0.0
-            );
-        """)
-        connection.execute(update_risk_stmt)
-        connection.commit()
-        print("✅ Supplier risk scores updated from recent events.")
+    upsert_events(engine, events_data, recompute_supplier_scores=True)
 
 if __name__ == "__main__":
     engine = get_db_engine()
     if engine:
         create_tables(engine)
+        ensure_events_ml_columns(engine)
         events_to_load = load_geocoded_data()
         if events_to_load:
             populate_database(engine, events_to_load)

@@ -54,3 +54,7 @@ pnpm-debug.log*
 # Pipeline-generated outputs (keep source inputs tracked)
 data/processed/
 data/forecasts/
+model_training/uncertain_candidates.csv
+model_training/labeled_data.csv
+model_training/eval_set.csv
+model_training/classifier.pkl

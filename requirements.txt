@@ -68,6 +68,7 @@ et_xmlfile==2.0.0
 expiringdict==1.2.2
 fake-http-header==0.3.5
 fake-useragent==2.2.0
+feedparser==6.0.12
 Faker==37.11.0
 fastapi==0.118.3
 fastapi-cli==0.0.13

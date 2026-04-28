@@ -69,6 +69,9 @@ class Event(BaseModel):
     latitude: Optional[float] = None
     longitude: Optional[float] = None
     temporal_info: Optional[dict] = None # NEW: Temporal prediction data
+    ml_risk_label: Optional[str] = None
+    ml_risk_confidence: Optional[float] = None
+    ml_risk_probabilities: Optional[dict] = None
     class Config:
         from_attributes = True
 

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -8,6 +8,7 @@ import {
   Activity,
   CheckCircle,
   AlertCircle,
+  Rss,
 } from 'lucide-react';
 import { Header } from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
@@ -21,11 +22,13 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { api } from '@/lib/api';
 import { mapSupplier } from '@/lib/dataMappers';
 
 export default function AdminPage() {
   const [isUpdating, setIsUpdating] = useState(false);
+  const [isIngesting, setIsIngesting] = useState(false);
   const queryClient = useQueryClient();
 
   const suppliersQuery = useQuery({
@@ -38,7 +41,37 @@ export default function AdminPage() {
     queryFn: api.getSummary,
   });
 
+  const statusQuery = useQuery({
+    queryKey: ['rssStatus'],
+    queryFn: api.getRssIngestStatus,
+    refetchInterval: 1000,
+  });
+
+  const isCurrentlyIngesting = isIngesting || (statusQuery.data?.is_running ?? false);
+
+  const [prevRunning, setPrevRunning] = useState(false);
+  useEffect(() => {
+    const isRunning = statusQuery.data?.is_running ?? false;
+    if (prevRunning && !isRunning) {
+      // Ingestion just finished
+      setIsIngesting(false);
+      handleTriggerUpdate();
+    }
+    setPrevRunning(isRunning);
+  }, [statusQuery.data?.is_running, prevRunning]);
+
   const suppliers = (suppliersQuery.data ?? []).map(mapSupplier);
+
+  const handleTriggerIngest = async () => {
+    setIsIngesting(true);
+    try {
+      await api.triggerRssIngest();
+      // Polling will handle UI state updates
+    } catch (e) {
+      console.error(e);
+      setIsIngesting(false);
+    }
+  };
 
   const handleTriggerUpdate = async () => {
     setIsUpdating(true);
@@ -66,7 +99,51 @@ export default function AdminPage() {
         )}
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+          >
+            <Card className="glass-card border-border hover:border-primary/30 transition-colors cursor-pointer">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Rss className={`w-4 h-4 ${isCurrentlyIngesting ? 'animate-pulse text-primary' : ''}`} />
+                  Fetch Live News
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Button
+                  size="sm"
+                  onClick={handleTriggerIngest}
+                  disabled={isCurrentlyIngesting}
+                  className="w-full"
+                  variant="default"
+                >
+                  {isCurrentlyIngesting ? 'Ingesting...' : 'Trigger RSS'}
+                </Button>
+                {isCurrentlyIngesting && (
+                  <div className="mt-3 space-y-1">
+                    <div className="flex justify-between text-xs text-muted-foreground">
+                      <span className="truncate mr-2">{statusQuery.data?.current_step || 'Starting...'}</span>
+                      <span>{statusQuery.data?.progress_percent || 0}%</span>
+                    </div>
+                    <Progress value={statusQuery.data?.progress_percent || 0} className="h-1.5" />
+                    {(statusQuery.data?.total_items ?? 0) > 0 && (
+                      <div className="text-[10px] text-muted-foreground text-right mt-1">
+                        {statusQuery.data?.items_processed} / {statusQuery.data?.total_items} processed
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!isCurrentlyIngesting && statusQuery.data?.error && (
+                  <div className="mt-3 text-xs text-risk-high bg-risk-high/10 p-2 rounded">
+                    Error: {statusQuery.data.error}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </motion.div>
+
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}

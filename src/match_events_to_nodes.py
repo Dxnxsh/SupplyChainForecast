@@ -202,15 +202,8 @@ def save_matched_events(events, output_path="data/processed/matched_events.jsonl
     print(f"✅ Matched events saved to {output_path}")
 
 
-def main():
-    """Main function to match events to nodes."""
-    # Load geocoded events
-    events = load_geocoded_events()
-    if not events:
-        print("No events to process.")
-        return
-    
-    # Match each event to a node
+def match_all_events(events):
+    """Match a list of events to supplier nodes."""
     matched_count = 0
     unmatched_count = 0
     
@@ -230,15 +223,30 @@ def main():
     print(f"\n📊 Matching Results:")
     print(f"  ✅ Matched: {matched_count} events")
     print(f"  ❌ Unmatched: {unmatched_count} events")
-    print(f"  📈 Match rate: {matched_count/len(events)*100:.1f}%")
+    if len(events) > 0:
+        print(f"  📈 Match rate: {matched_count/len(events)*100:.1f}%")
+        
+    return events
+
+
+def main():
+    """Main function to match events to nodes."""
+    # Load geocoded events
+    events = load_geocoded_events()
+    if not events:
+        print("No events to process.")
+        return
+    
+    # Match each event to a node
+    matched_events = match_all_events(events)
     
     # Save the matched events
-    save_matched_events(events)
+    save_matched_events(matched_events)
     
     # Print distribution by node
     print(f"\n📍 Events by Node:")
     node_counts = {}
-    for event in events:
+    for event in matched_events:
         node = event.get('matched_node', 'Unmatched')
         node_counts[node] = node_counts.get(node, 0) + 1
     

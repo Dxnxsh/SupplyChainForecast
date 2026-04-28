@@ -59,3 +59,5 @@ model_training/labeled_data.csv
 model_training/eval_set.csv
 model_training/classifier.pkl
 model_training/risk_scoring_eval_set.csv
+data/geocode_cache.json
+data/validation/validation_report_20260429_042144.json

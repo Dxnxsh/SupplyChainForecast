@@ -325,3 +325,18 @@ if __name__ == "__main__":
             populate_database(engine, events_to_load)
         else:
             print("🤷 No geocoded events to load.")
+
+def get_all_events(engine):
+    """Fetches all events from the database and returns them as a list of dicts."""
+    events = []
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(text("SELECT * FROM events"))
+            for row in result:
+                event_dict = dict(row._mapping)
+                if isinstance(event_dict.get('article_timestamp'), datetime):
+                    event_dict['article_timestamp'] = event_dict['article_timestamp'].isoformat()
+                events.append(event_dict)
+    except SQLAlchemyError as e:
+        print(f"❌ Error fetching all events: {e}")
+    return events

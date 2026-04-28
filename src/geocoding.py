@@ -25,6 +25,22 @@ TARGET_LOCATIONS_COORDINATES = {
     "Tesla_Berlin": {"lat": 52.4045, "lon": 13.7845}, # Grünheide
 }
 
+CACHE_FILE = "data/geocode_cache.json"
+
+def load_geocode_cache():
+    if os.path.exists(CACHE_FILE):
+        try:
+            with open(CACHE_FILE, 'r') as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_geocode_cache(cache):
+    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
+    with open(CACHE_FILE, 'w') as f:
+        json.dump(cache, f, indent=2)
+
 # --- Helper Function for Geocoding with Retry ---
 def geocode_location_with_retry(location_name):
     """
@@ -68,8 +84,8 @@ def geocode_location_with_retry(location_name):
     geocode_location_with_retry.cache[location_name.lower()] = None # Cache failure
     return None, None
 
-# Initialize the cache as an attribute of the function
-geocode_location_with_retry.cache = {}
+# Initialize the cache
+geocode_location_with_retry.cache = load_geocode_cache()
 
 # --- Core Geocoding Logic ---
 def load_scored_data(filepath="data/processed/scored_events.jsonl"):
@@ -92,21 +108,15 @@ def geocode_events(scored_events):
     geocoded_count = 0
     
     # Reset cache for each run
-    geocode_location_with_retry.cache = {} 
+    geocode_location_with_retry.cache = load_geocode_cache() 
 
     for i, event in enumerate(scored_events):
-        matched_node = event.get('matched_node')
-        extracted_locations = event.get('extracted_locations') # This is a list
+        extracted_locations = event.get('extracted_locations')
 
         location_to_geocode = None
 
-        # --- <<< NEW: Determine Location & Skip Logic >>> ---
-        # Priority 1: Use matched_node if available and not empty
-        if matched_node:
-            location_to_geocode = matched_node
-        # Priority 2: If no valid matched_node, use the first extracted_location if available
-        elif extracted_locations and isinstance(extracted_locations, list) and len(extracted_locations) > 0 and extracted_locations[0]:
-            location_to_geocode = extracted_locations[0] # Take the first location
+        if extracted_locations and isinstance(extracted_locations, list) and len(extracted_locations) > 0 and extracted_locations[0]:
+            location_to_geocode = extracted_locations[0]
 
         # --- <<< If NO location text found, skip this event entirely >>> ---
         if not location_to_geocode:
@@ -116,12 +126,6 @@ def geocode_events(scored_events):
 
         # --- If location text exists, proceed with geocoding ---
         latitude, longitude = geocode_location_with_retry(location_to_geocode)
-
-        # Use fallback coordinates ONLY if primary geocoding fails AND a matched node exists
-        if (latitude is None or longitude is None) and matched_node and matched_node in TARGET_LOCATIONS_COORDINATES:
-            fallback_coords = TARGET_LOCATIONS_COORDINATES[matched_node]
-            latitude, longitude = fallback_coords['lat'], fallback_coords['lon']
-            # print(f"   -> Geocoding failed for '{location_to_geocode}', using fallback coordinates for node '{matched_node}'")
 
         # Add geocoding results to the event dictionary
         event['latitude'] = latitude
@@ -141,6 +145,8 @@ def geocode_events(scored_events):
 
         if (i + 1) % 50 == 0: # Print progress less frequently
             print(f"   Processed {i+1}/{len(scored_events)} events...")
+
+    save_geocode_cache(geocode_location_with_retry.cache)
 
     print(f"\n✅ Geocoding complete.")
     print(f"   Successfully geocoded (or used fallback for) {geocoded_count} events.")

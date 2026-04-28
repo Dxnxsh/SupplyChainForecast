@@ -1,7 +1,10 @@
 # src/main.py
 
-from fastapi import FastAPI, HTTPException, Depends, Query
+from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
+import threading
+import time
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker, Session
 from pydantic import BaseModel
@@ -104,11 +107,41 @@ class HybridForecastPoint(BaseModel):
     class Config:
         from_attributes = True
 
+# --- Background Tasks ---
+def rss_ingest_worker():
+    from pathlib import Path
+    from src.rss_ingest import run_once
+    import os
+    
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    feeds_path = os.getenv("RSS_FEEDS_PATH", str(PROJECT_ROOT / "config" / "rss_feeds.json"))
+    model_path = os.getenv("ML_CLASSIFIER_PATH", str(PROJECT_ROOT / "model_training" / "classifier.pkl"))
+    
+    interval = 600 # 10 minutes
+    logger.info("RSS Ingest background worker started.")
+    while True:
+        try:
+            logger.info("Running RSS ingest cycle...")
+            run_once(feeds_path, model_path, False, True)
+        except Exception as e:
+            logger.error(f"RSS Ingest cycle failed: {e}")
+        time.sleep(interval)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    worker_thread = threading.Thread(target=rss_ingest_worker, daemon=True)
+    worker_thread.start()
+    yield
+    # Shutdown
+    # Daemon thread will exit automatically
+
 # --- FastAPI App Initialization ---
 app = FastAPI(
     title="Supply Chain Disruption Forecaster API",
     description="API to serve risk data and forecasts for supply chain nodes and events.",
-    version="1.2.0" # Updated version number
+    version="1.2.0", # Updated version number
+    lifespan=lifespan
 )
 
 # --- CORS Middleware ---
@@ -213,6 +246,31 @@ def get_events_by_node(
     except Exception as e:
         logger.error(f"Error fetching events for node '{node_name}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Could not fetch events for node '{node_name}': {e}")
+
+@app.post("/admin/rss-ingest/trigger", tags=["Admin"])
+def trigger_rss_ingest(background_tasks: BackgroundTasks):
+    """
+    Manually triggers an RSS ingestion cycle in the background.
+    """
+    from pathlib import Path
+    from src.rss_ingest import run_once
+    import os
+    
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
+    feeds_path = os.getenv("RSS_FEEDS_PATH", str(PROJECT_ROOT / "config" / "rss_feeds.json"))
+    model_path = os.getenv("ML_CLASSIFIER_PATH", str(PROJECT_ROOT / "model_training" / "classifier.pkl"))
+    
+    # Run the ingestion in the background so we don't block the API response
+    background_tasks.add_task(run_once, feeds_path, model_path, False, True)
+    return {"status": "success", "message": "RSS ingestion started in the background."}
+
+@app.get("/admin/rss-ingest/status", tags=["Admin"])
+def get_rss_ingest_status():
+    """
+    Returns the current progress of the background RSS ingestion.
+    """
+    from src.rss_ingest import ingestion_status
+    return ingestion_status
 
 @app.get("/summary", response_model=EventSummary, tags=["Dashboard Data"])
 def get_dashboard_summary(db: Session = Depends(get_db)):

@@ -40,12 +40,25 @@ export interface BackendSummary {
   most_common_event_type?: string | null;
 }
 
-export interface BackendForecastPoint {
+export interface BackendHybridForecastPoint {
   ds: string;
   yhat: number;
   yhat_lower: number;
   yhat_upper: number;
+  news_contribution: number;
+  historical_contribution: number;
+  method: string;
 }
+
+export interface RssIngestStatus {
+  is_running: boolean;
+  current_step: string;
+  progress_percent: number;
+  items_processed: number;
+  total_items: number;
+  error: string | null;
+}
+
 
 const fetchJson = async <T>(path: string): Promise<T> => {
   const response = await fetch(`${API_BASE_URL}${path}`);
@@ -77,8 +90,19 @@ export const api = {
       `/events/forecasted/by_node/${encodeURIComponent(nodeName)}?limit=${clampLimit(limit)}`
     ),
   getSupplierForecast: (nodeName: string) =>
-    fetchJson<BackendForecastPoint[]>(
-      `/suppliers/${encodeURIComponent(nodeName)}/forecast`
+    fetchJson<BackendHybridForecastPoint[]>(
+      `/suppliers/${encodeURIComponent(nodeName)}/hybrid_forecast`
     ),
   getSummary: () => fetchJson<BackendSummary>('/summary'),
+  triggerRssIngest: async () => {
+    const response = await fetch(`${API_BASE_URL}/admin/rss-ingest/trigger`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(`Failed to trigger RSS ingestion: ${detail || response.statusText}`);
+    }
+    return response.json();
+  },
+  getRssIngestStatus: () => fetchJson<RssIngestStatus>('/admin/rss-ingest/status'),
 };

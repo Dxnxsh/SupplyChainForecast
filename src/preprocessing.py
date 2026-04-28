@@ -5,7 +5,6 @@ import os
 import pickle
 import re
 import time
-import spacy
 import torch
 from langdetect import detect
 from transformers import pipeline
@@ -45,13 +44,6 @@ def load_ml_classifier(model_path=ML_CLASSIFIER_PATH):
 
 # --- Global NLP Model Initialization ---
 # This section loads the models into memory once when the script starts.
-try:
-    nlp_spacy = spacy.load("en_core_web_sm")
-    print("spaCy model 'en_core_web_sm' loaded. 📚")
-except Exception as e:
-    print(f"❌ Error loading spaCy model: {e}")
-    print("Please run: python -m spacy download en_core_web_sm")
-    exit()
 
 try:
     ner_device, ner_device_name = _select_torch_device()
@@ -247,7 +239,7 @@ def predict_ml_risk_batch(headlines, texts, vectorizer, model):
 
 # --- Main Orchestration Function ---
 
-def process_all_data():
+def process_all_data(save_to_disk=False):
     """Main function to run the full preprocessing pipeline."""
     total_start = time.perf_counter()
     load_start = time.perf_counter()
@@ -325,19 +317,23 @@ def process_all_data():
                 })
     processing_elapsed = time.perf_counter() - processing_start
 
-    output_dir = "data/processed"
-    os.makedirs(output_dir, exist_ok=True)
-    output_path = os.path.join(output_dir, "processed_events.jsonl")
+    if save_to_disk:
+        output_dir = "data/processed"
+        os.makedirs(output_dir, exist_ok=True)
+        output_path = os.path.join(output_dir, "processed_events.jsonl")
 
-    write_start = time.perf_counter()
-    with open(output_path, 'w', encoding='utf-8') as f:
-        for entry in all_processed_events:
-            json.dump(entry, f, ensure_ascii=False)
-            f.write('\n')
-    write_elapsed = time.perf_counter() - write_start
+        write_start = time.perf_counter()
+        with open(output_path, 'w', encoding='utf-8') as f:
+            for entry in all_processed_events:
+                json.dump(entry, f, ensure_ascii=False)
+                f.write('\n')
+        write_elapsed = time.perf_counter() - write_start
+        print(f"\n✅ Preprocessing complete. Saved {len(all_processed_events)} granular event entries to {output_path}")
+    else:
+        write_elapsed = 0
+        print(f"\n✅ Preprocessing complete. Processed {len(all_processed_events)} granular event entries.")
+    
     total_elapsed = time.perf_counter() - total_start
-
-    print(f"\n✅ Preprocessing complete. Saved {len(all_processed_events)} granular event entries to {output_path}")
     print("\n⏱️ Timing Summary")
     print(f"   Data load: {load_elapsed:.2f}s")
     print(f"   Processing (incl. language + keyword + NER): {processing_elapsed:.2f}s")
@@ -354,5 +350,7 @@ def process_all_data():
     if ml_elapsed_total > 0:
         print(f"   ML inference paragraphs/sec: {candidate_paragraphs / ml_elapsed_total:.2f}")
 
+    return all_processed_events
+
 if __name__ == "__main__":
-    process_all_data()
+    process_all_data(save_to_disk=True)

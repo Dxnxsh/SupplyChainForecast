@@ -113,36 +113,59 @@ export default function ResilienceHistoryPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <AreaChart data={forecastData}>
                   <defs>
-                    <linearGradient id="forecastGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="hsl(0, 84%, 60%)" stopOpacity={0.3} />
+                    <linearGradient id="histGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(250, 60%, 60%)" stopOpacity={0.4} />
+                      <stop offset="95%" stopColor="hsl(250, 60%, 60%)" stopOpacity={0} />
+                    </linearGradient>
+                    <linearGradient id="newsGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="hsl(0, 84%, 60%)" stopOpacity={0.4} />
                       <stop offset="95%" stopColor="hsl(0, 84%, 60%)" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(217, 33%, 18%)" />
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(217, 33%, 18%)" vertical={false} />
                   <XAxis
                     dataKey="ds"
                     stroke="hsl(215, 20%, 55%)"
                     tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 12 }}
                     tickFormatter={(value) => value.slice(5)}
+                    tickLine={false}
+                    axisLine={false}
+                    dy={10}
                   />
                   <YAxis
                     stroke="hsl(215, 20%, 55%)"
                     tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 12 }}
                     domain={[0, 100]}
+                    tickLine={false}
+                    axisLine={false}
+                    dx={-10}
                   />
                   <Tooltip
                     contentStyle={{
                       backgroundColor: 'hsl(222, 47%, 10%)',
                       border: '1px solid hsl(217, 33%, 18%)',
                       borderRadius: '8px',
+                      color: 'hsl(210, 40%, 98%)'
                     }}
-                    labelStyle={{ color: 'hsl(210, 40%, 98%)' }}
+                    itemStyle={{ color: 'hsl(210, 40%, 98%)' }}
+                    labelStyle={{ color: 'hsl(215, 20%, 65%)', marginBottom: '8px' }}
                   />
                   <Area
                     type="monotone"
-                    dataKey="yhat"
+                    dataKey="historical_contribution"
+                    name="Historical Trend"
+                    stackId="1"
+                    stroke="hsl(250, 60%, 60%)"
+                    fill="url(#histGradient)"
+                    strokeWidth={2}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="news_contribution"
+                    name="Predictive News"
+                    stackId="1"
                     stroke="hsl(0, 84%, 60%)"
-                    fill="url(#forecastGradient)"
+                    fill="url(#newsGradient)"
                     strokeWidth={2}
                   />
                 </AreaChart>

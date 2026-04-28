@@ -2,75 +2,35 @@
 """
 Complete pipeline with predictive forecasting capability.
 Runs all steps from raw data to hybrid forecasts that understand upcoming events.
+Optimized for in-memory processing.
 """
 
 import sys
-import subprocess
 import os
+import json
 from pathlib import Path
 
 # Ensure we're in the project root
 PROJECT_ROOT = Path(__file__).parent
 os.chdir(PROJECT_ROOT)
 
-STEPS = [
-    {
-        "name": "1. Preprocessing",
-        "script": "src/preprocessing.py",
-        "description": "Extract events from raw news articles",
-        "required": True
-    },
-    {
-        "name": "2. Filter Events",
-        "script": "src/filter_events.py",
-        "description": "Filter for supply-chain relevant events",
-        "required": True
-    },
-    {
-        "name": "3. Risk Scoring",
-        "script": "src/risk_scoring.py",
-        "description": "Calculate risk scores based on event types and urgency",
-        "required": True
-    },
-    {
-        "name": "4. Geocoding",
-        "script": "src/geocoding.py",
-        "description": "Extract and geocode location information",
-        "required": True
-    },
-    {
-        "name": "5. Match to Supply Chain Nodes",
-        "script": "src/match_events_to_nodes.py",
-        "description": "Match events to supplier nodes",
-        "required": True
-    },
-    {
-        "name": "6. Temporal Extraction (NEW)",
-        "script": "src/temporal_extraction.py",
-        "description": "Extract WHEN predicted events will occur (hurricanes, strikes, etc.)",
-        "required": False,
-        "new": True
-    },
-    {
-        "name": "7. Hybrid Forecasting (NEW)",
-        "script": "src/predictive_forecasting.py",
-        "description": "Generate forecasts combining news predictions + historical trends",
-        "required": False,
-        "new": True
-    },
-    {
-        "name": "8. Load to Database",
-        "script": "src/load_to_db.py",
-        "description": "Load processed events to PostgreSQL database",
-        "required": False
-    }
-]
+sys.path.append(str(PROJECT_ROOT))
+
+# Import pipeline functions
+from src.preprocessing import process_all_data
+from src.filter_events import filter_events, save_filtered_data
+from src.risk_scoring import score_all_events, save_scored_data
+from src.geocoding import geocode_events, save_geocoded_data
+from src.match_events_to_nodes import match_all_events, save_matched_events
+from src.temporal_extraction import enrich_events_with_temporal_data, save_temporal_enriched_data
+from src.predictive_forecasting import generate_all_node_forecasts
+from src.load_to_db import get_db_engine, create_tables, populate_database
 
 
 def print_header():
     """Print a nice header."""
     print("\n" + "="*80)
-    print("🚀 SUPPLY CHAIN PREDICTIVE FORECASTING PIPELINE")
+    print("🚀 SUPPLY CHAIN PREDICTIVE FORECASTING PIPELINE (OPTIMIZED)")
     print("="*80)
     print("\nThis pipeline enables forecasting based on news about UPCOMING events:")
     print("  ✅ Hurricane warnings with predicted landfall dates")
@@ -80,56 +40,14 @@ def print_header():
     print("\n" + "="*80 + "\n")
 
 
-def run_step(step, skip_optional=False, skip_preprocessing=False):
-    """Run a single pipeline step."""
-    # Skip optional steps if requested
-    if not step['required'] and skip_optional:
-        print(f"\n⏭️  Skipping: {step['name']} (optional)")
-        return True
-    
-    # Skip preprocessing if requested
-    if skip_preprocessing and step['name'] == "1. Preprocessing":
-        print(f"\n⏭️  Skipping: {step['name']} (using existing processed data)")
-        return True
-    
-    print(f"\n{'🆕' if step.get('new') else '▶️'}  {step['name']}")
-    print(f"   {step['description']}")
-    print("-" * 80)
-    
-    script_path = PROJECT_ROOT / step['script']
-    
-    if not script_path.exists():
-        print(f"   ⚠️  Script not found: {script_path}")
-        return False
-    
-    try:
-        result = subprocess.run(
-            [sys.executable, str(script_path)],
-            cwd=PROJECT_ROOT,
-            capture_output=False,
-            text=True
-        )
-        
-        if result.returncode != 0:
-            print(f"   ❌ Step failed with return code {result.returncode}")
-            return False
-        
-        print(f"   ✅ Completed successfully")
-        return True
-        
-    except Exception as e:
-        print(f"   ❌ Error: {e}")
-        return False
-
-
 def check_dependencies():
     """Check if required packages are installed."""
     print("🔍 Checking dependencies...")
     
     required_packages = [
-        ('spacy', 'python -m spacy download en_core_web_sm'),
         ('prophet', 'pip install prophet'),
         ('dateutil', 'pip install python-dateutil'),
+        ('transformers', 'pip install transformers torch'),
     ]
     
     missing = []
@@ -195,8 +113,8 @@ def print_summary():
     print("✅ PIPELINE COMPLETE")
     print("="*80)
     print("\nGenerated Outputs:")
-    print("  📁 data/processed/temporal_enriched_events.jsonl")
     print("  📁 data/forecasts/*.json")
+    print("  🐘 Data loaded to PostgreSQL")
     print("\nNext Steps:")
     print("  1. Review forecast files in data/forecasts/")
     print("  2. Start API server: python src/main.py")
@@ -208,8 +126,14 @@ def print_summary():
     print("="*80 + "\n")
 
 
+def load_preprocessed_data_from_file():
+    filepath = "data/processed/processed_events.jsonl"
+    with open(filepath, 'r', encoding='utf-8') as f:
+        return [json.loads(line) for line in f]
+
+
 def main():
-    """Run the complete pipeline."""
+    """Run the complete pipeline in memory."""
     print_header()
     
     # Pre-flight checks
@@ -220,7 +144,7 @@ def main():
     # Ask user about preprocessing
     print("Pipeline Configuration:")
     print("  Step 1: Preprocessing (extracts events from raw news)")
-    print("  Steps 2-5: Required processing steps")
+    print("  Steps 2-5: Required processing steps (Filter, Score, Geocode, Match)")
     print("  Steps 6-8: Optional (predictive forecasting + database)")
     print()
     
@@ -246,45 +170,78 @@ def main():
     optional_response = input("Run optional predictive forecasting steps? (Y/n): ").strip().lower()
     skip_optional = (optional_response == 'n')
     
+    save_intermediate = input("Save intermediate JSONL files to disk? (y/N): ").strip().lower() == 'y'
+
     if skip_optional:
         print("\n⚠️  Will skip optional steps (no hybrid forecasting)")
     else:
         print("\n✨ Will run full pipeline with predictive forecasting")
     
-    input("\nPress Enter to continue...")
+    print("\n🚀 Starting in-memory pipeline execution...")
     
-    # Run pipeline steps
-    success_count = 0
-    fail_count = 0
-    skipped_count = 0
-    
-    for step in STEPS:
-        # Check if we're skipping this step
-        is_skipped = (skip_preprocessing and step['name'] == "1. Preprocessing") or \
-                     (not step['required'] and skip_optional)
-        
-        if is_skipped and (skip_preprocessing and step['name'] == "1. Preprocessing"):
-            skipped_count += 1
-        
-        success = run_step(step, skip_optional, skip_preprocessing)
-        if success:
-            success_count += 1
-        else:
-            fail_count += 1
-            
-            if step['required'] and not (skip_preprocessing and step['name'] == "1. Preprocessing"):
-                print(f"\n❌ Required step failed: {step['name']}")
-                print("   Pipeline cannot continue.")
-                sys.exit(1)
-            elif not step['required']:
-                response = input(f"\n⚠️  Optional step failed. Continue? (y/N): ").strip().lower()
-                if response != 'y':
-                    print("\n🛑 Pipeline stopped by user.")
-                    sys.exit(1)
-    
+    # --- Step 1: Preprocessing ---
+    print("\n▶️  1. Preprocessing")
+    if skip_preprocessing:
+        events = load_preprocessed_data_from_file()
+        print(f"✅ Loaded {len(events)} preprocessed events from disk.")
+    else:
+        events = process_all_data(save_to_disk=save_intermediate)
+
+    if not events:
+        print("❌ Pipeline failed: No events to process.")
+        sys.exit(1)
+
+    # --- Step 2: Filter Events ---
+    print("\n▶️  2. Filter Events")
+    events = filter_events(events)
+    if save_intermediate:
+        save_filtered_data(events)
+
+    if not events:
+        print("❌ Pipeline failed: All events were filtered out.")
+        sys.exit(1)
+
+    # --- Step 3: Risk Scoring ---
+    print("\n▶️  3. Risk Scoring")
+    events = score_all_events(events)
+    if save_intermediate:
+        save_scored_data(events)
+
+    # --- Step 4: Geocoding ---
+    print("\n▶️  4. Geocoding")
+    events = geocode_events(events)
+    if save_intermediate:
+        save_geocoded_data(events)
+
+    # --- Step 5: Match to Supply Chain Nodes ---
+    print("\n▶️  5. Match to Supply Chain Nodes")
+    events = match_all_events(events)
+    if save_intermediate:
+        save_matched_events(events)
+
+    # Optional Steps
+    if not skip_optional:
+        # --- Step 6: Temporal Extraction ---
+        print("\n▶️  6. Temporal Extraction")
+        events = enrich_events_with_temporal_data(events)
+        if save_intermediate:
+            save_temporal_enriched_data(events)
+
+        # --- Step 7: Predictive Forecasting ---
+        print("\n▶️  7. Predictive Forecasting")
+        generate_all_node_forecasts(events, forecast_days=14)
+
+    # --- Step 8: Load to Database ---
+    print("\n▶️  8. Load to Database")
+    engine = get_db_engine()
+    if engine:
+        create_tables(engine)
+        populate_database(engine, events)
+    else:
+        print("❌ Could not connect to database, skipping data load.")
+
     # Summary
     print_summary()
-    print(f"📊 Summary: {success_count} steps completed, {fail_count} steps failed, {skipped_count} steps skipped\n")
 
 
 if __name__ == "__main__":
@@ -294,6 +251,7 @@ if __name__ == "__main__":
         print("\n\n🛑 Pipeline interrupted by user.")
         sys.exit(1)
     except Exception as e:
+        import traceback
         print(f"\n❌ Unexpected error: {e}")
+        traceback.print_exc()
         sys.exit(1)
-

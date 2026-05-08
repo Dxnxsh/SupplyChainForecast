@@ -99,7 +99,7 @@ def create_future_risk_projections(events, forecast_days=14):
     today = datetime.now().date()
     
     for event in events:
-        temporal_info = event.get('temporal_info', {})
+        temporal_info = event.get('temporal_info') or {}
         
         # Only process events with predicted future dates
         if not temporal_info.get('is_predictive') or not temporal_info.get('predicted_date'):

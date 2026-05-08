@@ -192,7 +192,7 @@ def _recompute_supplier_risk_scores(connection):
         UPDATE suppliers AS s
         SET current_risk_score = COALESCE(
             (
-                SELECT ROUND(AVG(e.risk_score)::numeric, 2)
+                SELECT ROUND(LEAST(100.0, AVG(e.risk_score) + (MAX(e.risk_score) * 0.8))::numeric, 2)
                 FROM events AS e
                 WHERE e.matched_node = s.node_name
                   AND e.risk_score IS NOT NULL
@@ -200,7 +200,7 @@ def _recompute_supplier_risk_scores(connection):
                   AND e.article_timestamp >= NOW() - INTERVAL '30 days'
             ),
             (
-                SELECT ROUND(AVG(e.risk_score)::numeric, 2)
+                SELECT ROUND(LEAST(100.0, AVG(e.risk_score) + (MAX(e.risk_score) * 0.8))::numeric, 2)
                 FROM events AS e
                 WHERE e.matched_node = s.node_name
                   AND e.risk_score IS NOT NULL

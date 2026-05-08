@@ -182,7 +182,7 @@ def calculate_risk_components(event):
     """Returns relevance, severity, and final risk score for an event."""
     relevance_score = calculate_relevance_score(event)
     severity_score = calculate_severity_score(event)
-    risk_score = round(severity_score * (relevance_score / 100.0), 2)
+    risk_score = min(100.0, round(severity_score * 5.0 * (relevance_score / 100.0), 2))
 
     return {
         'risk_relevance_score': relevance_score,

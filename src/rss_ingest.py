@@ -30,7 +30,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-ML_TO_RISK = {"HIGH": 25.0, "MEDIUM": 12.0, "LOW": 3.0}
+ML_TO_RISK = {"HIGH": 85.0, "MEDIUM": 45.0, "LOW": 15.0}
 
 ingestion_status = {
     "is_running": False,

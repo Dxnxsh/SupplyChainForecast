@@ -1,10 +1,12 @@
+import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, MapPin, AlertCircle, Calendar, MapPinned } from 'lucide-react';
+import { X, MapPin, AlertCircle, Calendar, MapPinned, Sparkles, Loader2 } from 'lucide-react';
 import { Supplier, DisruptionEvent } from '@/types/supplier';
 import { RiskBadge } from './RiskBadge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
+import { api } from '@/lib/api';
 
 interface SupplierDetailPanelProps {
   supplier: Supplier | null;
@@ -19,6 +21,35 @@ export function SupplierDetailPanel({
   isLoading = false,
   onClose,
 }: SupplierDetailPanelProps) {
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiModel, setAiModel] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setAiSummary(null);
+    setAiModel(null);
+    setAiError(null);
+    setAiLoading(false);
+  }, [supplier?.id]);
+
+  const handleAiSummary = async () => {
+    if (!supplier) return;
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const res = await api.postSupplierAiSummary(supplier.id);
+      setAiSummary(res.summary);
+      setAiModel(res.model_used);
+    } catch (e) {
+      setAiSummary(null);
+      setAiModel(null);
+      setAiError(e instanceof Error ? e.message : 'Summary request failed');
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
   return (
     <AnimatePresence>
       {supplier && (
@@ -54,10 +85,13 @@ export function SupplierDetailPanel({
           <div className="p-5 space-y-4">
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-foreground">Risk Score</span>
+                <span className="text-sm font-medium text-foreground">Exposure</span>
                 <span className="text-sm text-muted-foreground">{supplier.riskScore}%</span>
               </div>
               <Progress value={supplier.riskScore} className="h-2" />
+              <p className="text-xs text-muted-foreground mt-1">
+                0–100 roll-up from recent events (prefers model impact when present).
+              </p>
             </div>
             <div>
               <div className="flex items-center justify-between mb-2">
@@ -77,6 +111,50 @@ export function SupplierDetailPanel({
                 <MapPinned className="w-4 h-4" />
                 Real supplier location from backend
               </div>
+            </div>
+
+            <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium text-foreground flex items-center gap-2">
+                  <Sparkles className="w-4 h-4 text-primary" />
+                  AI summary
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={aiLoading}
+                  onClick={handleAiSummary}
+                  className="shrink-0"
+                >
+                  {aiLoading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
+                      Working…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5 mr-1" />
+                      Generate
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Runs only when you click Generate. Uses OpenRouter on the server (
+                <code className="text-[10px]">OPENROUTER_API_KEY</code>).
+              </p>
+              {aiError && (
+                <p className="text-xs text-risk-high whitespace-pre-wrap">{aiError}</p>
+              )}
+              {aiSummary && (
+                <div className="text-sm text-foreground whitespace-pre-wrap border-t border-border pt-2 mt-1">
+                  {aiSummary}
+                </div>
+              )}
+              {aiModel && (
+                <p className="text-[10px] text-muted-foreground">Model: {aiModel}</p>
+              )}
             </div>
           </div>
 
@@ -104,6 +182,16 @@ export function SupplierDetailPanel({
                     <p className="text-xs text-muted-foreground mt-1">{event.description}</p>
                     {(typeof event.riskScore === 'number' || typeof event.riskRelevanceScore === 'number' || typeof event.riskSeverityScore === 'number') && (
                       <div className="flex flex-wrap gap-2 mt-2">
+                        {typeof event.impactScore === 'number' && (
+                          <span className="inline-flex items-center rounded-full bg-risk-medium/15 px-2 py-0.5 text-[11px] font-medium text-risk-medium">
+                            {typeof event.predictedImpactScore === 'number' ? 'Impact (Model)' : 'Impact'} {Math.round(event.impactScore)}%
+                          </span>
+                        )}
+                        {typeof event.predictedImpactScore === 'number' && (
+                          <span className="inline-flex items-center rounded-full bg-secondary/70 px-2 py-0.5 text-[11px] font-medium text-secondary-foreground">
+                            Model
+                          </span>
+                        )}
                         {typeof event.riskScore === 'number' && (
                           <span className="inline-flex items-center rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
                             Risk {Math.round(event.riskScore)}%

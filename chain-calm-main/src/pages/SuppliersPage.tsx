@@ -115,7 +115,7 @@ export default function SuppliersPage() {
                   onClick={() => handleSort('riskScore')}
                 >
                   <div className="flex items-center gap-2">
-                    Risk Score
+                    Exposure
                     <ArrowUpDown className="w-4 h-4" />
                   </div>
                 </TableHead>

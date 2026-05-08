@@ -51,6 +51,10 @@ export default function NewsEventsPage() {
             <div className="space-y-4">
               {latestEvents.map((event, index) => {
                 const supplier = suppliers.find((s) => s.id === event.matched_node);
+                const hasModelImpact = typeof event.predicted_impact_score === 'number';
+                const effectiveImpact = hasModelImpact
+                  ? event.predicted_impact_score
+                  : event.impact_score;
                 const primaryDate = formatBackendDate(event.article_timestamp);
                 const fallbackDate = event.temporal_info?.predicted_date
                   ? formatBackendDate(event.temporal_info.predicted_date)
@@ -97,8 +101,13 @@ export default function NewsEventsPage() {
                       </div>
                       <div className="flex flex-col items-end gap-2 text-right">
                         <Badge className={scoreBadgeClass}>Risk {Math.round(event.risk_score ?? 0)}%</Badge>
-                        {typeof event.impact_score === 'number' && (
-                          <Badge className="bg-risk-medium/15 text-risk-medium border-0">Impact {Math.round(event.impact_score)}%</Badge>
+                        {typeof effectiveImpact === 'number' && (
+                          <Badge className="bg-risk-medium/15 text-risk-medium border-0">
+                            {hasModelImpact ? 'Impact (Model)' : 'Impact'} {Math.round(effectiveImpact)}%
+                          </Badge>
+                        )}
+                        {hasModelImpact && (
+                          <Badge className={subtleBadgeClass}>Model</Badge>
                         )}
                         {typeof event.risk_relevance_score === 'number' && (
                           <Badge className={subtleBadgeClass}>Relevance {Math.round(event.risk_relevance_score)}%</Badge>
@@ -131,6 +140,10 @@ export default function NewsEventsPage() {
             <div className="space-y-4">
               {forecastedEvents.map((event, index) => {
                 const supplier = suppliers.find((s) => s.id === event.matched_node);
+                const hasModelImpact = typeof event.predicted_impact_score === 'number';
+                const effectiveImpact = hasModelImpact
+                  ? event.predicted_impact_score
+                  : event.impact_score;
 
                 return (
                   <motion.div
@@ -149,9 +162,19 @@ export default function NewsEventsPage() {
                           {event.event_text_segment ?? 'Forecast generated from backend predictive pipeline.'}
                         </p>
                       </div>
-                      <Badge className="bg-risk-medium/15 text-risk-medium border-0">
-                        Risk {Math.round(event.risk_score ?? 0)}%
-                      </Badge>
+                      <div className="flex flex-col items-end gap-2">
+                        <Badge className="bg-risk-medium/15 text-risk-medium border-0">
+                          Risk {Math.round(event.risk_score ?? 0)}%
+                        </Badge>
+                        {typeof effectiveImpact === 'number' && (
+                          <Badge className="bg-risk-medium/15 text-risk-medium border-0">
+                            {hasModelImpact ? 'Impact (Model)' : 'Impact'} {Math.round(effectiveImpact)}%
+                          </Badge>
+                        )}
+                        {hasModelImpact && (
+                          <Badge className={subtleBadgeClass}>Model</Badge>
+                        )}
+                      </div>
                     </div>
                     {(typeof event.risk_relevance_score === 'number' || typeof event.risk_severity_score === 'number') && (
                       <div className="flex flex-wrap gap-2 mb-3">

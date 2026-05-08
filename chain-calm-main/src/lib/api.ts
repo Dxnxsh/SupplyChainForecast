@@ -24,6 +24,7 @@ export interface BackendEvent {
   risk_relevance_score?: number | null;
   risk_severity_score?: number | null;
   impact_score?: number | null;
+  predicted_impact_score?: number | null;
   latitude?: number | null;
   longitude?: number | null;
   temporal_info?: {
@@ -57,6 +58,12 @@ export interface RssIngestStatus {
   items_processed: number;
   total_items: number;
   error: string | null;
+}
+
+export interface NodeAiSummaryResponse {
+  summary: string;
+  model_used: string;
+  node_name: string;
 }
 
 
@@ -105,4 +112,21 @@ export const api = {
     return response.json();
   },
   getRssIngestStatus: () => fetchJson<RssIngestStatus>('/admin/rss-ingest/status'),
+  postSupplierAiSummary: async (nodeName: string, model?: string | null) => {
+    const response = await fetch(
+      `${API_BASE_URL}/suppliers/${encodeURIComponent(nodeName)}/ai-summary`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(model ? { model } : {}),
+      }
+    );
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(
+        `AI summary failed (${response.status}): ${detail || response.statusText}`
+      );
+    }
+    return response.json() as Promise<NodeAiSummaryResponse>;
+  },
 };

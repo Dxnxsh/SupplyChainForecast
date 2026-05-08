@@ -14,6 +14,9 @@ __pycache__/
 .coverage.*
 htmlcov/
 .ipynb_checkpoints/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
 
 # Virtual environments
 venv/
@@ -22,27 +25,37 @@ env/
 ENV/
 venv311/
 
-# Build / packaging artifacts
+# Build / packaging (Python wheels + Vite `dist/` under chain-calm-main, etc.)
 build/
 dist/
-*.egg-info/
-.eggs/
-pip-wheel-metadata/
 
 # Local secrets / env files
 .env
 .env.*
 !.env.example
 
+# Local app config (use rss_feeds.example.json as template)
+config/rss_feeds.json
+
 # Node / frontend
 node_modules/
-frontend/node_modules/
-frontend/build/
 coverage/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
+*.log
+.eslintcache
+
+# Pipeline & runtime data (keep tracked samples in data/raw if you want them in git)
+data/processed/
+data/forecasts/
+data/geocode_cache.json
+data/validation/
+
+# Trained models & generated training tables (keep *.py in model_training/)
+model_training/**/*.pkl
+model_training/**/*.csv
 
 # IDE / editor
 .idea/
@@ -51,13 +64,5 @@ pnpm-debug.log*
 *.swp
 *.swo
 
-# Pipeline-generated outputs (keep source inputs tracked)
-data/processed/
-data/forecasts/
-model_training/uncertain_candidates.csv
-model_training/labeled_data.csv
-model_training/eval_set.csv
-model_training/classifier.pkl
-model_training/risk_scoring_eval_set.csv
-data/geocode_cache.json
-data/validation/validation_report_20260429_042144.json
+# Cursor local workspace settings (optional; remove this line if you want them shared)
+.cursor/

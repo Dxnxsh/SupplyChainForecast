@@ -117,12 +117,12 @@ def print_summary():
     print("  🐘 Data loaded to PostgreSQL")
     print("\nNext Steps:")
     print("  1. Review forecast files in data/forecasts/")
-    print("  2. Start API server: python src/main.py")
+    print("  2. Start API: venv311/bin/python -m uvicorn src.main:app --host 127.0.0.1 --port 8000")
     print("  3. Test hybrid forecast endpoint:")
     print("     curl http://127.0.0.1:8000/suppliers/[NODE_NAME]/hybrid_forecast")
-    print("  4. Update frontend to use hybrid forecasts")
+    print("  4. UI: cd chain-calm-main && npm run dev (expects API on :8000)")
     print("\nDocumentation:")
-    print("  📖 See PREDICTIVE_FORECASTING_GUIDE.md for details")
+    print("  📖 See CLAUDE.md for pipeline and API overview")
     print("="*80 + "\n")
 
 

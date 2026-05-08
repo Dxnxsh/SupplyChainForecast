@@ -7,5 +7,9 @@ const detectApiBaseUrl = (): string => {
   return `${protocol}//${hostname}:8000`;
 };
 
-export const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL ?? detectApiBaseUrl();
+/** Trim trailing slashes so paths like `/suppliers/...` never become `//suppliers/...`. */
+const normalizeBaseUrl = (url: string) => url.replace(/\/+$/, '');
+
+export const API_BASE_URL = normalizeBaseUrl(
+  import.meta.env.VITE_API_BASE_URL ?? detectApiBaseUrl()
+);

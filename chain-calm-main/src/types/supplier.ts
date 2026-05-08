@@ -20,24 +20,10 @@ export interface DisruptionEvent {
   riskScore?: number;
   riskRelevanceScore?: number;
   riskSeverityScore?: number;
-  isPredictive?: boolean;
-  predictedDate?: string;
-}
-
-export interface NewsArticle {
-  id: string;
-  title: string;
-  source: string;
-  publishedAt: string;
-  url: string;
-  matchedNode?: string;
-  riskScore?: number;
-  riskRelevanceScore?: number;
-  riskSeverityScore?: number;
   impactScore?: number;
+  predictedImpactScore?: number;
   isPredictive?: boolean;
   predictedDate?: string;
-  eventText?: string;
 }
 
 export interface ResilienceHistory {

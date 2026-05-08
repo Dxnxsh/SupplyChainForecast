@@ -264,7 +264,7 @@ export default function AdminPage() {
               <TableRow className="hover:bg-transparent border-border">
                 <TableHead>Name</TableHead>
                 <TableHead>Country</TableHead>
-                <TableHead>Risk Score</TableHead>
+                <TableHead>Exposure</TableHead>
                 <TableHead>Criticality</TableHead>
                 <TableHead>Coordinates</TableHead>
               </TableRow>

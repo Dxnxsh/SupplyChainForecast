@@ -68,6 +68,8 @@ def create_tables(engine):
         Column('ml_risk_label', String),
         Column('ml_risk_confidence', Float),
         Column('ml_risk_probabilities', JSONB),
+        Column('predicted_disruption_probability', Float),
+        Column('predicted_impact_score', Float),
     )
 
     try:
@@ -107,6 +109,21 @@ def ensure_events_risk_columns(engine):
         print("✅ Risk score columns verified on events table.")
     except SQLAlchemyError as e:
         print(f"⚠️ Could not ensure risk columns (may be non-Postgres): {e}")
+
+
+def ensure_events_impact_columns(engine):
+    """Add impact prediction columns to events if missing."""
+    stmts = [
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS predicted_disruption_probability DOUBLE PRECISION;",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS predicted_impact_score DOUBLE PRECISION;",
+    ]
+    try:
+        with engine.begin() as connection:
+            for stmt in stmts:
+                connection.execute(text(stmt))
+        print("✅ Impact prediction columns verified on events table.")
+    except SQLAlchemyError as e:
+        print(f"⚠️ Could not ensure impact columns (may be non-Postgres): {e}")
 
 
 def load_geocoded_data(filepath="data/processed/temporal_enriched_events.jsonl"):
@@ -187,24 +204,53 @@ def parse_timestamp_robust(timestamp_str):
 
 
 def _recompute_supplier_risk_scores(connection):
+    """
+    Roll up per-node exposure to 0–100 for the suppliers table.
+
+    Per-event strength uses predicted_impact_score (training scale ~0–300) scaled to 0–100
+    when present; otherwise risk_score. Blend is softer than the old avg + 0.8*max formula,
+    which saturated at 100 for most nodes whenever any HIGH-risk headlines appeared.
+    """
     print("Recomputing 'current_risk_score' for suppliers from recent event risk data...")
     update_risk_stmt = text("""
         UPDATE suppliers AS s
         SET current_risk_score = COALESCE(
             (
-                SELECT ROUND(LEAST(100.0, AVG(e.risk_score) + (MAX(e.risk_score) * 0.8))::numeric, 2)
-                FROM events AS e
-                WHERE e.matched_node = s.node_name
-                  AND e.risk_score IS NOT NULL
-                  AND e.risk_score > 0
-                  AND e.article_timestamp >= NOW() - INTERVAL '30 days'
+                SELECT ROUND(LEAST(100.0, 0.62 * AVG(t.strength) + 0.38 * MAX(t.strength))::numeric, 2)
+                FROM (
+                    SELECT LEAST(
+                        100.0,
+                        COALESCE(
+                            e.predicted_impact_score::double precision / 3.0,
+                            e.risk_score::double precision
+                        )
+                    ) AS strength
+                    FROM events AS e
+                    WHERE e.matched_node = s.node_name
+                      AND e.article_timestamp >= NOW() - INTERVAL '30 days'
+                      AND (
+                          (e.risk_score IS NOT NULL AND e.risk_score > 0)
+                          OR e.predicted_impact_score IS NOT NULL
+                      )
+                ) AS t
             ),
             (
-                SELECT ROUND(LEAST(100.0, AVG(e.risk_score) + (MAX(e.risk_score) * 0.8))::numeric, 2)
-                FROM events AS e
-                WHERE e.matched_node = s.node_name
-                  AND e.risk_score IS NOT NULL
-                  AND e.risk_score > 0
+                SELECT ROUND(LEAST(100.0, 0.62 * AVG(t.strength) + 0.38 * MAX(t.strength))::numeric, 2)
+                FROM (
+                    SELECT LEAST(
+                        100.0,
+                        COALESCE(
+                            e.predicted_impact_score::double precision / 3.0,
+                            e.risk_score::double precision
+                        )
+                    ) AS strength
+                    FROM events AS e
+                    WHERE e.matched_node = s.node_name
+                      AND (
+                          (e.risk_score IS NOT NULL AND e.risk_score > 0)
+                          OR e.predicted_impact_score IS NOT NULL
+                      )
+                ) AS t
             ),
             0.0
         );
@@ -222,6 +268,7 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
         return 0
     ensure_events_ml_columns(engine)
     ensure_events_risk_columns(engine)
+    ensure_events_impact_columns(engine)
     insert_count = 0
     with engine.connect() as connection:
         print(f"Upserting {len(events_data)} event(s)...")
@@ -237,12 +284,12 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                 INSERT INTO events (
                     article_url, article_source, article_title, article_timestamp, event_text_segment,
                     potential_event_types, extracted_locations, matched_node, risk_score, risk_relevance_score, risk_severity_score, latitude, longitude,
-                    temporal_info, ml_risk_label, ml_risk_confidence, ml_risk_probabilities
+                    temporal_info, ml_risk_label, ml_risk_confidence, ml_risk_probabilities, predicted_disruption_probability, predicted_impact_score
                 )
                 VALUES (
                     :article_url, :article_source, :article_title, :article_timestamp, :event_text_segment,
                     :potential_event_types, :extracted_locations, :matched_node, :risk_score, :risk_relevance_score, :risk_severity_score, :latitude, :longitude,
-                    :temporal_info, :ml_risk_label, :ml_risk_confidence, :ml_risk_probabilities
+                    :temporal_info, :ml_risk_label, :ml_risk_confidence, :ml_risk_probabilities, :predicted_disruption_probability, :predicted_impact_score
                 )
                 ON CONFLICT (article_url) DO UPDATE SET
                     article_source = COALESCE(EXCLUDED.article_source, events.article_source),
@@ -260,7 +307,9 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                     temporal_info = COALESCE(EXCLUDED.temporal_info, events.temporal_info),
                     ml_risk_label = COALESCE(EXCLUDED.ml_risk_label, events.ml_risk_label),
                     ml_risk_confidence = COALESCE(EXCLUDED.ml_risk_confidence, events.ml_risk_confidence),
-                    ml_risk_probabilities = COALESCE(EXCLUDED.ml_risk_probabilities, events.ml_risk_probabilities);
+                    ml_risk_probabilities = COALESCE(EXCLUDED.ml_risk_probabilities, events.ml_risk_probabilities),
+                    predicted_disruption_probability = COALESCE(EXCLUDED.predicted_disruption_probability, events.predicted_disruption_probability),
+                    predicted_impact_score = COALESCE(EXCLUDED.predicted_impact_score, events.predicted_impact_score);
             """)
             try:
                 result = connection.execute(stmt, {
@@ -281,6 +330,8 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                     "ml_risk_label": event.get('ml_risk_label'),
                     "ml_risk_confidence": event.get('ml_risk_confidence'),
                     "ml_risk_probabilities": ml_risk_probabilities_json,
+                    "predicted_disruption_probability": event.get('predicted_disruption_probability'),
+                    "predicted_impact_score": event.get('predicted_impact_score'),
                 })
                 if result.rowcount > 0:
                     insert_count += 1
@@ -297,6 +348,7 @@ def populate_database(engine, events_data):
     """Populates the 'suppliers' and 'events' tables with data."""
     ensure_events_ml_columns(engine)
     ensure_events_risk_columns(engine)
+    ensure_events_impact_columns(engine)
     with engine.connect() as connection:
         print("Populating 'suppliers' table with criticality...")
         for node_name, details in SUPPLIER_NODES.items():

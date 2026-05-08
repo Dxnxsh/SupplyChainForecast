@@ -98,13 +98,13 @@ export function WorldMap({ suppliers, onSupplierClick, selectedSupplier }: World
 
       {/* Map Legend */}
       <div className="absolute bottom-4 left-4 glass-card rounded-lg p-3">
-        <p className="text-xs font-medium text-muted-foreground mb-2">Risk Level</p>
+        <p className="text-xs font-medium text-muted-foreground mb-2">Exposure (node)</p>
         <div className="space-y-1.5">
           {[
-            { level: 'low' as RiskLevel, label: 'Low', range: '0–30' },
-            { level: 'medium' as RiskLevel, label: 'Medium', range: '31–60' },
-            { level: 'high' as RiskLevel, label: 'High', range: '61–80' },
-            { level: 'critical' as RiskLevel, label: 'Critical', range: '>80' },
+            { level: 'low' as RiskLevel, label: 'Low', range: '0–42' },
+            { level: 'medium' as RiskLevel, label: 'Medium', range: '43–68' },
+            { level: 'high' as RiskLevel, label: 'High', range: '69–86' },
+            { level: 'critical' as RiskLevel, label: 'Critical', range: '87–100' },
           ].map(({ level, label, range }) => (
             <div key={level} className="flex items-center gap-2">
               <span
@@ -138,7 +138,7 @@ export function WorldMap({ suppliers, onSupplierClick, selectedSupplier }: World
                 style={{ backgroundColor: riskColors[tooltipContent.riskLevel] }}
               />
               <span className="text-xs text-muted-foreground capitalize">
-                {tooltipContent.riskLevel} risk
+                {tooltipContent.riskLevel} exposure
               </span>
             </div>
           </motion.div>

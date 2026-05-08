@@ -74,7 +74,7 @@ export default function ResilienceHistoryPage() {
             animate={{ opacity: 1, y: 0 }}
             className="glass-card rounded-xl p-5"
           >
-            <p className="text-sm text-muted-foreground">Current Risk Score</p>
+            <p className="text-sm text-muted-foreground">Current exposure</p>
             <p className="text-3xl font-bold text-risk-high mt-1">
               {selectedSupplier?.riskScore}%
             </p>

@@ -1,15 +1,18 @@
 import { BackendEvent, BackendSupplier } from '@/lib/api';
-import {
-  DisruptionEvent,
-  NewsArticle,
-  RiskLevel,
-  Supplier,
-} from '@/types/supplier';
+import { DisruptionEvent, RiskLevel, Supplier } from '@/types/supplier';
 
 const riskLevelFromScore = (score: number): RiskLevel => {
   if (score <= 30) return 'low';
   if (score <= 60) return 'medium';
   if (score <= 80) return 'high';
+  return 'critical';
+};
+
+/** Buckets for supplier node exposure (0–100 roll-up). Wider than event scores so the map is not all red when many nodes sit in the 70–95 range. */
+const supplierExposureLevel = (exposure: number): RiskLevel => {
+  if (exposure <= 42) return 'low';
+  if (exposure <= 68) return 'medium';
+  if (exposure <= 86) return 'high';
   return 'critical';
 };
 
@@ -27,6 +30,12 @@ const dateOnly = (value?: string | null): string => {
   return toIsoStringOrNow(value).slice(0, 10);
 };
 
+const getEffectiveImpactScore = (event: BackendEvent): number | undefined => {
+  if (event.predicted_impact_score != null) return event.predicted_impact_score;
+  if (event.impact_score != null) return event.impact_score;
+  return undefined;
+};
+
 export const mapSupplier = (supplier: BackendSupplier): Supplier => {
   const riskScore = Math.round(supplier.current_risk_score ?? 0);
 
@@ -37,34 +46,13 @@ export const mapSupplier = (supplier: BackendSupplier): Supplier => {
     coordinates: [supplier.longitude, supplier.latitude],
     riskScore,
     criticality: supplier.criticality,
-    riskLevel: riskLevelFromScore(riskScore),
-  };
-};
-
-export const mapNewsArticle = (event: BackendEvent): NewsArticle => {
-  return {
-    id: String(event.id),
-    title:
-      event.article_title ??
-      event.temporal_info?.event_description ??
-      event.event_text_segment ??
-      'Supply chain event update',
-    source: event.article_source ?? 'Unknown Source',
-    publishedAt: toIsoStringOrNow(event.article_timestamp),
-    url: event.article_url || '#',
-    matchedNode: event.matched_node ?? undefined,
-    riskScore: event.risk_score ?? undefined,
-    riskRelevanceScore: event.risk_relevance_score ?? undefined,
-    riskSeverityScore: event.risk_severity_score ?? undefined,
-    impactScore: event.impact_score ?? undefined,
-    isPredictive: event.temporal_info?.is_predictive,
-    predictedDate: event.temporal_info?.predicted_date,
-    eventText: event.event_text_segment ?? undefined,
+    riskLevel: supplierExposureLevel(riskScore),
   };
 };
 
 export const mapDisruptionEvent = (event: BackendEvent): DisruptionEvent => {
-  const severityScore = event.impact_score ?? event.risk_severity_score ?? event.risk_score ?? 0;
+  const impactScore = getEffectiveImpactScore(event);
+  const severityScore = impactScore ?? event.risk_severity_score ?? event.risk_score ?? 0;
   const eventType = event.potential_event_types?.[0]?.replace(/_/g, ' ');
   const title =
     event.article_title ??
@@ -82,6 +70,8 @@ export const mapDisruptionEvent = (event: BackendEvent): DisruptionEvent => {
     riskScore: event.risk_score ?? undefined,
     riskRelevanceScore: event.risk_relevance_score ?? undefined,
     riskSeverityScore: event.risk_severity_score ?? undefined,
+    impactScore,
+    predictedImpactScore: event.predicted_impact_score ?? undefined,
     isPredictive: event.temporal_info?.is_predictive,
     predictedDate: event.temporal_info?.predicted_date,
   };

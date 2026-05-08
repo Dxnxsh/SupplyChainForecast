@@ -25,6 +25,9 @@ import time
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
+import numpy as np
+from scipy import sparse
+
 # Project root on sys.path when run as script or module
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -65,6 +68,120 @@ def load_classifier(model_path: str):
     with path.open("rb") as f:
         vectorizer, model = pickle.load(f)
     return vectorizer, model
+
+
+def load_impact_regressor(model_path: str | None):
+    if not model_path:
+        return None
+    path = Path(model_path)
+    if not path.is_file():
+        return None
+    with path.open("rb") as f:
+        payload = pickle.load(f)
+    if not isinstance(payload, dict) or "model" not in payload or "artifacts" not in payload:
+        raise ValueError(f"Invalid impact regressor artifact format: {path}")
+    return payload
+
+
+def load_disruption_classifier(model_path: str | None):
+    if not model_path:
+        return None
+    path = Path(model_path)
+    if not path.is_file():
+        return None
+    with path.open("rb") as f:
+        payload = pickle.load(f)
+    if not isinstance(payload, dict) or "model" not in payload or "artifacts" not in payload:
+        raise ValueError(f"Invalid disruption classifier artifact format: {path}")
+    return payload
+
+
+def _event_to_shared_features(event: dict, artifacts: dict):
+    text_vectorizer = artifacts["text_vectorizer"]
+    cat_encoder = artifacts["cat_encoder"]
+    categorical_cols = artifacts.get("categorical_cols", [])
+
+    text_input = [
+        ((event.get("article_title") or "") + " " + (event.get("event_text_segment") or "")[:700]).strip()
+    ]
+    cat_row = [[(event.get(col) or "") for col in categorical_cols]]
+    X_text = text_vectorizer.transform(text_input)
+    X_cat = cat_encoder.transform(cat_row)
+    return sparse.hstack([X_text, X_cat], format="csr")
+
+
+def _event_to_impact_features(event: dict, artifacts: dict, disruption_probability: float | None):
+    # Backward compatibility for first regressor version.
+    if "numeric_cols" not in artifacts:
+        base = _event_to_shared_features(event, artifacts)
+        if disruption_probability is None:
+            disruption_probability = 0.0
+        return sparse.hstack([base, sparse.csr_matrix([[float(disruption_probability)]])], format="csr")
+
+    text_input = (
+        (event.get("article_title") or "")
+        + " "
+        + (event.get("event_text_segment") or "")[:600]
+    )
+    text_input = [text_input]
+
+    categorical_cols = artifacts.get("categorical_cols", [])
+    numeric_cols = artifacts.get("numeric_cols", [])
+    cat_encoder = artifacts["cat_encoder"]
+    text_vectorizer = artifacts["text_vectorizer"]
+
+    node_criticality = float(event.get("node_criticality") or 1.0)
+    prob_map = event.get("ml_risk_probabilities") or {}
+
+    event_for_features = {
+        "article_source": event.get("article_source") or "",
+        "matched_node": event.get("matched_node") or "",
+        "ml_risk_label": event.get("ml_risk_label") or "UNKNOWN",
+        "node_criticality": node_criticality,
+        "ml_risk_confidence": float(event.get("ml_risk_confidence") or 0.0),
+        "ml_prob_low": float(prob_map.get("LOW", 0.0)),
+        "ml_prob_medium": float(prob_map.get("MEDIUM", 0.0)),
+        "ml_prob_high": float(prob_map.get("HIGH", 0.0)),
+    }
+
+    X_text = text_vectorizer.transform(text_input)
+    X_cat = cat_encoder.transform([[event_for_features.get(c, "") for c in categorical_cols]])
+    X_num = sparse.csr_matrix([[float(event_for_features.get(c, 0.0)) for c in numeric_cols]])
+    return sparse.hstack([X_text, X_cat, X_num], format="csr")
+
+
+def attach_predicted_impact_scores(events: list[dict], impact_payload: dict) -> None:
+    if not events:
+        return
+    model = impact_payload["model"]
+    artifacts = impact_payload["artifacts"]
+    for event in events:
+        try:
+            features = _event_to_impact_features(
+                event,
+                artifacts,
+                disruption_probability=event.get("predicted_disruption_probability"),
+            )
+            predicted = float(model.predict(features)[0])
+            event["predicted_impact_score"] = round(max(0.0, predicted), 3)
+        except Exception as exc:
+            event["predicted_impact_score"] = None
+            print(f"⚠️ Impact prediction skipped for event: {exc}")
+
+
+def attach_disruption_probabilities(events: list[dict], classifier_payload: dict) -> None:
+    if not events:
+        return
+    model = classifier_payload["model"]
+    artifacts = classifier_payload["artifacts"]
+    for event in events:
+        try:
+            features = _event_to_shared_features(event, artifacts)
+            prob = float(model.predict_proba(features)[0][1])
+            event["predicted_disruption_probability"] = round(prob, 4)
+        except Exception as exc:
+            event["predicted_disruption_probability"] = None
+            print(f"⚠️ Disruption classification skipped for event: {exc}")
 
 
 def load_feeds_config(config_path: str) -> list[dict]:
@@ -139,6 +256,8 @@ def feed_entry_to_event_dict(entry, source_name: str, vectorizer, model) -> dict
         "ml_risk_label": pred.upper() if pred.upper() in ML_TO_RISK else pred,
         "ml_risk_confidence": confidence,
         "ml_risk_probabilities": prob_map,
+        "predicted_disruption_probability": None,
+        "predicted_impact_score": None,
     }
 
 
@@ -165,6 +284,8 @@ def fetch_and_build_events(feeds: list[dict], vectorizer, model) -> list[dict]:
 def run_once(
     feeds_path: str,
     model_path: str,
+    disruption_model_path: str | None,
+    impact_model_path: str | None,
     skip_db: bool,
     is_background: bool = False,
 ) -> int:
@@ -174,6 +295,12 @@ def run_once(
             
         feeds = load_feeds_config(feeds_path)
         vectorizer, model = load_classifier(model_path)
+        disruption_payload = load_disruption_classifier(disruption_model_path)
+        if disruption_model_path and not disruption_payload:
+            print(f"⚠️ Disruption classifier not found at {disruption_model_path}; continuing without it.")
+        impact_payload = load_impact_regressor(impact_model_path)
+        if impact_model_path and not impact_payload:
+            print(f"⚠️ Impact regressor not found at {impact_model_path}; continuing without it.")
         batch = fetch_and_build_events(feeds, vectorizer, model)
         
         print(f"Fetched {len(batch)} item(s) from RSS. Running NLP enrichment...")
@@ -225,6 +352,21 @@ def run_once(
             if is_background:
                 update_status(current_step="Extracting Temporal Projections...", progress_percent=85)
             batch = enrich_events_with_temporal_data(batch)
+
+            if impact_payload:
+                try:
+                    from src.load_to_db import SUPPLIER_NODES
+                    for ev in batch:
+                        node = ev.get("matched_node")
+                        ev["node_criticality"] = (
+                            SUPPLIER_NODES.get(node, {}).get("criticality", 1) if node else 1
+                        )
+                except Exception:
+                    for ev in batch:
+                        ev["node_criticality"] = 1
+                if disruption_payload:
+                    attach_disruption_probabilities(batch, disruption_payload)
+                attach_predicted_impact_scores(batch, impact_payload)
 
         print(f"Enrichment complete. Preparing to save {len(batch)} item(s).")
         if is_background:
@@ -281,6 +423,16 @@ def main():
         default=os.getenv("ML_CLASSIFIER_PATH", str(PROJECT_ROOT / "model_training" / "classifier.pkl")),
         help="Classifier pickle path",
     )
+    parser.add_argument(
+        "--impact-model",
+        default=os.getenv("IMPACT_REGRESSOR_PATH", str(PROJECT_ROOT / "model_training" / "impact_regressor_v2.pkl")),
+        help="Optional impact regressor pickle path",
+    )
+    parser.add_argument(
+        "--disruption-model",
+        default=os.getenv("DISRUPTION_CLASSIFIER_PATH", str(PROJECT_ROOT / "model_training" / "disruption_classifier.pkl")),
+        help="Optional disruption classifier pickle path",
+    )
     parser.add_argument("--interval", type=int, default=0, help="If >0, re-run every N seconds")
     parser.add_argument("--skip-db", action="store_true", help="Only fetch + score; do not write DB")
     args = parser.parse_args()
@@ -290,7 +442,7 @@ def main():
     if args.interval and args.interval > 0:
         while True:
             try:
-                run_once(args.feeds, args.model, args.skip_db)
+                run_once(args.feeds, args.model, args.disruption_model, args.impact_model, args.skip_db)
             except KeyboardInterrupt:
                 print("\nStopped.")
                 sys.exit(0)
@@ -299,7 +451,7 @@ def main():
             time.sleep(args.interval)
     else:
         try:
-            n = run_once(args.feeds, args.model, args.skip_db)
+            n = run_once(args.feeds, args.model, args.disruption_model, args.impact_model, args.skip_db)
             print(f"Done. Processed {n} item(s).")
         except Exception as e:
             print(f"❌ {e}")

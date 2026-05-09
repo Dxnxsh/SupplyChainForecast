@@ -66,6 +66,26 @@ export interface NodeAiSummaryResponse {
   node_name: string;
 }
 
+export interface ForecastSnapshotPoint {
+  ds: string;
+  yhat: number;
+  yhat_lower: number;
+  yhat_upper: number;
+  y_actual: number | null;
+}
+
+export interface ForecastSnapshotResponse {
+  node_name: string;
+  forecast_date: string;
+  points: ForecastSnapshotPoint[];
+  generated_on_demand: boolean;
+  mae: number | null;
+  completed_days: number;
+  horizon_days: number;
+}
+
+const asOfParam = (asOf?: string | null) =>
+  asOf && asOf.length > 0 ? `&as_of=${encodeURIComponent(asOf)}` : '';
 
 const fetchJson = async <T>(path: string): Promise<T> => {
   const response = await fetch(`${API_BASE_URL}${path}`);
@@ -83,24 +103,47 @@ const fetchJson = async <T>(path: string): Promise<T> => {
 const clampLimit = (value: number, max = 200) => Math.min(Math.max(Math.floor(value), 1), max);
 
 export const api = {
-  getSuppliers: () => fetchJson<BackendSupplier[]>('/suppliers'),
-  getLatestEvents: (count = 100) =>
-    fetchJson<BackendEvent[]>(`/events/latest?count=${clampLimit(count)}`),
-  getEventsByNode: (nodeName: string, limit = 200) =>
-    fetchJson<BackendEvent[]>(
-      `/events/by_node/${encodeURIComponent(nodeName)}?limit=${clampLimit(limit)}`
+  getSuppliers: (asOf?: string | null) =>
+    fetchJson<BackendSupplier[]>(
+      `/suppliers${asOf && asOf.length > 0 ? `?as_of=${encodeURIComponent(asOf)}` : ''}`
     ),
-  getForecastedEvents: (count = 100) =>
-    fetchJson<BackendEvent[]>(`/events/forecasted?count=${clampLimit(count)}`),
-  getForecastedEventsByNode: (nodeName: string, limit = 100) =>
+  getLatestEvents: (count = 100, asOf?: string | null) =>
     fetchJson<BackendEvent[]>(
-      `/events/forecasted/by_node/${encodeURIComponent(nodeName)}?limit=${clampLimit(limit)}`
+      `/events/latest?count=${clampLimit(count)}${asOfParam(asOf)}`
+    ),
+  getEventsByNode: (nodeName: string, limit = 200, asOf?: string | null) =>
+    fetchJson<BackendEvent[]>(
+      `/events/by_node/${encodeURIComponent(nodeName)}?limit=${clampLimit(limit)}${asOfParam(asOf)}`
+    ),
+  getForecastedEvents: (count = 100, asOf?: string | null) =>
+    fetchJson<BackendEvent[]>(
+      `/events/forecasted?count=${clampLimit(count)}${asOfParam(asOf)}`
+    ),
+  getForecastedEventsByNode: (nodeName: string, limit = 100, asOf?: string | null) =>
+    fetchJson<BackendEvent[]>(
+      `/events/forecasted/by_node/${encodeURIComponent(nodeName)}?limit=${clampLimit(limit)}${asOfParam(asOf)}`
     ),
   getSupplierForecast: (nodeName: string) =>
     fetchJson<BackendHybridForecastPoint[]>(
       `/suppliers/${encodeURIComponent(nodeName)}/hybrid_forecast`
     ),
-  getSummary: () => fetchJson<BackendSummary>('/summary'),
+  getSummary: (asOf?: string | null) =>
+    fetchJson<BackendSummary>(`/summary${asOf && asOf.length > 0 ? `?as_of=${encodeURIComponent(asOf)}` : ''}`),
+  getForecastSnapshotDates: (nodeName?: string | null) => {
+    const q =
+      nodeName && nodeName.length > 0
+        ? `?node_name=${encodeURIComponent(nodeName)}`
+        : '';
+    return fetchJson<{ dates: string[] }>(`/forecast-snapshots/dates${q}`);
+  },
+  getForecastSnapshot: (
+    nodeName: string,
+    snapshotDate: string,
+    includeActuals = true
+  ) =>
+    fetchJson<ForecastSnapshotResponse>(
+      `/suppliers/${encodeURIComponent(nodeName)}/forecast_snapshot?date=${encodeURIComponent(snapshotDate)}&include_actuals=${includeActuals}`
+    ),
   triggerRssIngest: async () => {
     const response = await fetch(`${API_BASE_URL}/admin/rss-ingest/trigger`, {
       method: 'POST',

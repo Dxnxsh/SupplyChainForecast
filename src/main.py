@@ -120,6 +120,24 @@ class HybridForecastPoint(BaseModel):
     class Config:
         from_attributes = True
 
+
+class ForecastSnapshotPoint(BaseModel):
+    ds: date
+    yhat: float
+    yhat_lower: float
+    yhat_upper: float
+    y_actual: Optional[float] = None
+
+
+class ForecastSnapshotResponse(BaseModel):
+    node_name: str
+    forecast_date: date
+    points: List[ForecastSnapshotPoint]
+    generated_on_demand: bool
+    mae: Optional[float] = None
+    completed_days: int = 0
+    horizon_days: int = 14
+
 # --- Background Tasks ---
 def rss_ingest_worker():
     from pathlib import Path
@@ -145,6 +163,14 @@ def rss_ingest_worker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
+    if engine is not None:
+        try:
+            from src.forecast_snapshots import ensure_forecast_snapshots_table
+
+            ensure_forecast_snapshots_table(engine)
+            logger.info("✅ forecast_snapshots table ensured.")
+        except Exception as e:
+            logger.error("Could not ensure forecast_snapshots table: %s", e, exc_info=True)
     worker_thread = threading.Thread(target=rss_ingest_worker, daemon=True)
     worker_thread.start()
     yield
@@ -289,6 +315,71 @@ def _exposure_rollup_stats(db: Session, node_name: str):
     return d, use_30d, top_rows
 
 
+def _parse_as_of_optional(as_of: Optional[str] = Query(None, description="Rewind: include only data on or before this date (YYYY-MM-DD, UTC calendar day)")) -> Optional[date]:
+    if as_of is None or as_of.strip() == "":
+        return None
+    try:
+        return date.fromisoformat(as_of.strip())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid as_of; use YYYY-MM-DD.")
+
+
+def _supplier_exposure_as_of(db: Session, node_name: str, as_of: date) -> float:
+    """
+    Match load_to_db rollup with NOW replaced by as_of: 30d window ending as_of, else all-time through as_of.
+    """
+    base_filter = """
+        matched_node = :node_name
+        AND article_timestamp IS NOT NULL
+        AND article_timestamp::date <= :as_of
+        AND (
+            (risk_score IS NOT NULL AND risk_score > 0)
+            OR predicted_impact_score IS NOT NULL
+        )
+    """
+    stmt_30 = text(
+        f"""
+        SELECT ROUND(LEAST(100.0, 0.62 * AVG(strength) + 0.38 * MAX(strength))::numeric, 2) AS exposure
+        FROM (
+            SELECT LEAST(
+                100.0,
+                COALESCE(
+                    predicted_impact_score::double precision / 3.0,
+                    risk_score::double precision
+                )
+            ) AS strength
+            FROM events
+            WHERE {base_filter}
+              AND article_timestamp::date > :as_of - INTERVAL '30 days'
+        ) t
+        """
+    )
+    row = db.execute(stmt_30, {"node_name": node_name, "as_of": as_of}).fetchone()
+    val = row[0] if row and row[0] is not None else None
+    if val is not None:
+        return float(val)
+    stmt_all = text(
+        f"""
+        SELECT ROUND(LEAST(100.0, 0.62 * AVG(strength) + 0.38 * MAX(strength))::numeric, 2) AS exposure
+        FROM (
+            SELECT LEAST(
+                100.0,
+                COALESCE(
+                    predicted_impact_score::double precision / 3.0,
+                    risk_score::double precision
+                )
+            ) AS strength
+            FROM events
+            WHERE {base_filter}
+        ) t
+        """
+    )
+    row2 = db.execute(stmt_all, {"node_name": node_name, "as_of": as_of}).fetchone()
+    if row2 and row2[0] is not None:
+        return float(row2[0])
+    return 0.0
+
+
 # --- API Endpoints ---
 
 @app.get("/", tags=["Root"])
@@ -296,15 +387,27 @@ def read_root():
     return {"message": "Welcome to the Supply Chain Forecaster API!"}
 
 @app.get("/suppliers", response_model=List[Supplier], tags=["Suppliers"])
-def get_all_suppliers(db: Session = Depends(get_db)):
+def get_all_suppliers(
+    db: Session = Depends(get_db),
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
+):
     """
     Retrieves a list of all defined supply chain nodes/suppliers, including their criticality.
+    Optional as_of recomputes current_risk_score from events through that UTC date.
     """
     try:
-        # NEW: Ensure 'criticality' column is selected
         query = text("SELECT id, node_name, latitude, longitude, country, current_risk_score, criticality FROM suppliers")
         result = db.execute(query).fetchall()
-        return [Supplier.from_orm(row._mapping) for row in result]
+        rows = [dict(row._mapping) for row in result]
+        if as_of is not None:
+            today = date.today()
+            if as_of > today:
+                raise HTTPException(status_code=400, detail="as_of cannot be in the future.")
+            for r in rows:
+                r["current_risk_score"] = _supplier_exposure_as_of(db, r["node_name"], as_of)
+        return [Supplier.from_orm(r) for r in rows]
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching suppliers: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Could not fetch suppliers: {e}")
@@ -312,7 +415,8 @@ def get_all_suppliers(db: Session = Depends(get_db)):
 @app.get("/events/latest", response_model=List[Event], tags=["Events"])
 def get_latest_events(
     count: int = Query(50, description="Number of latest events to retrieve", ge=1, le=200),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
 ):
     """
     Retrieves the latest supply chain events, ordered by timestamp,
@@ -320,16 +424,24 @@ def get_latest_events(
     Only includes events with valid latitude and longitude.
     """
     try:
+        if as_of is not None and as_of > date.today():
+            raise HTTPException(status_code=400, detail="as_of cannot be in the future.")
         criticality_map = get_criticality_map(db)
+        as_filter = ""
+        params = {"count": count}
+        if as_of is not None:
+            as_filter = "AND article_timestamp::date <= :as_of"
+            params["as_of"] = as_of
         query = text(f"""
             SELECT * FROM events
                         WHERE latitude IS NOT NULL
                             AND longitude IS NOT NULL
                             AND article_timestamp IS NOT NULL
+                            {as_filter}
                         ORDER BY article_timestamp DESC NULLS LAST
             LIMIT :count;
         """)
-        result = db.execute(query, {"count": count}).fetchall()
+        result = db.execute(query, params).fetchall()
         return process_events_with_impact(result, criticality_map)
     except Exception as e:
         logger.error(f"Error fetching latest events: {e}", exc_info=True)
@@ -339,7 +451,8 @@ def get_latest_events(
 def get_events_by_node(
     node_name: str,
     limit: int = Query(100, description="Max number of events for the node", ge=1, le=200),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
 ):
     """
     Retrieves events associated with a specific supply chain node,
@@ -347,17 +460,25 @@ def get_events_by_node(
     Only includes events with valid latitude and longitude.
     """
     try:
+        if as_of is not None and as_of > date.today():
+            raise HTTPException(status_code=400, detail="as_of cannot be in the future.")
         criticality_map = get_criticality_map(db)
-        query = text("""
+        as_filter = ""
+        params = {"node_name": node_name, "limit": limit}
+        if as_of is not None:
+            as_filter = "AND article_timestamp::date <= :as_of"
+            params["as_of"] = as_of
+        query = text(f"""
             SELECT * FROM events
                         WHERE matched_node = :node_name
                             AND latitude IS NOT NULL
                             AND longitude IS NOT NULL
                             AND article_timestamp IS NOT NULL
+                            {as_filter}
                         ORDER BY article_timestamp DESC NULLS LAST
             LIMIT :limit;
         """)
-        result = db.execute(query, {"node_name": node_name, "limit": limit}).fetchall()
+        result = db.execute(query, params).fetchall()
         return process_events_with_impact(result, criticality_map)
     except Exception as e:
         logger.error(f"Error fetching events for node '{node_name}': {e}", exc_info=True)
@@ -593,33 +714,56 @@ def get_rss_ingest_status():
     return ingestion_status
 
 @app.get("/summary", response_model=EventSummary, tags=["Dashboard Data"])
-def get_dashboard_summary(db: Session = Depends(get_db)):
+def get_dashboard_summary(
+    db: Session = Depends(get_db),
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
+):
     """
     Provides a summary of total events, average risk, and most common event type across all data.
+    Optional as_of restricts aggregates to events on or before that UTC date.
     """
     try:
-        total_events_query = text("SELECT COUNT(*) FROM events;")
-        total_events = db.execute(total_events_query).scalar()
+        if as_of is not None and as_of > date.today():
+            raise HTTPException(status_code=400, detail="as_of cannot be in the future.")
+        as_filter = ""
+        params = {}
+        if as_of is not None:
+            as_filter = "WHERE article_timestamp IS NOT NULL AND article_timestamp::date <= :as_of"
+            params["as_of"] = as_of
 
-        avg_risk_query = text("SELECT AVG(risk_score) FROM events WHERE risk_score IS NOT NULL;")
-        avg_risk_score = db.execute(avg_risk_query).scalar()
+        total_events_query = text(f"SELECT COUNT(*) FROM events {as_filter};")
+        total_events = db.execute(total_events_query, params).scalar()
 
-        # Most common event type using jsonb_array_elements_text for robustness
-        most_common_event_type_query = text("""
+        avg_risk_query = text(
+            f"SELECT AVG(risk_score) FROM events WHERE risk_score IS NOT NULL "
+            f"{'AND article_timestamp::date <= :as_of' if as_of is not None else ''};"
+        )
+        avg_params = {"as_of": as_of} if as_of is not None else {}
+        avg_risk_score = db.execute(avg_risk_query, avg_params).scalar()
+
+        mct_filter = ""
+        if as_of is not None:
+            mct_filter = "AND article_timestamp::date <= :as_of"
+        most_common_event_type_query = text(f"""
             SELECT jsonb_array_elements_text(potential_event_types) as event_type
             FROM events
             WHERE potential_event_types IS NOT NULL AND potential_event_types != '[]'::jsonb
+            {mct_filter}
             GROUP BY event_type
             ORDER BY COUNT(*) DESC
             LIMIT 1;
         """)
-        most_common_event_type_result = db.execute(most_common_event_type_query).scalar()
+        most_common_event_type_result = db.execute(
+            most_common_event_type_query, params if as_of is not None else {}
+        ).scalar()
 
         return EventSummary(
             total_events=total_events,
             avg_risk_score=avg_risk_score,
             most_common_event_type=most_common_event_type_result
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching summary data: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Could not fetch summary: {e}")
@@ -730,10 +874,152 @@ def get_hybrid_forecast(node_name: str):
         logger.error(f"❌ Error loading hybrid forecast for '{node_name}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Could not load hybrid forecast: {e}")
 
+
+@app.get("/forecast-snapshots/dates", tags=["Forecasting"])
+@app.get("/api/forecast-snapshots/dates", tags=["Forecasting"], include_in_schema=False)
+def get_forecast_snapshot_dates(
+    node_name: Optional[str] = Query(None, description="Limit to dates that exist for this node"),
+    db: Session = Depends(get_db),
+):
+    """Distinct forecast_date values stored (newest first)."""
+    from src.forecast_snapshots import list_snapshot_dates
+
+    try:
+        dates = list_snapshot_dates(db, node_name)
+        return {"dates": [d.isoformat() for d in dates]}
+    except Exception as e:
+        logger.error("Error listing forecast snapshot dates: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get(
+    "/suppliers/{node_name}/forecast_snapshot",
+    response_model=ForecastSnapshotResponse,
+    tags=["Forecasting"],
+)
+@app.get(
+    "/api/suppliers/{node_name}/forecast_snapshot",
+    response_model=ForecastSnapshotResponse,
+    tags=["Forecasting"],
+    include_in_schema=False,
+)
+def get_forecast_snapshot(
+    node_name: str,
+    snapshot_date: date = Query(..., alias="date", description="Forecast origin date (YYYY-MM-DD)"),
+    include_actuals: bool = Query(True, description="Include realized daily sum(risk_score) per horizon day"),
+    db: Session = Depends(get_db),
+):
+    """
+    Load persisted daily Prophet snapshot for this node and date; if missing, generate, store (first write wins), return.
+    """
+    from src.forecast_snapshots import (
+        SOURCE_ON_DEMAND,
+        compute_accuracy_metrics,
+        ensure_snapshot_for_node,
+        fetch_actuals_for_horizon,
+        utc_today,
+    )
+
+    try:
+        today = utc_today()
+        if snapshot_date > today:
+            raise HTTPException(status_code=400, detail="forecast snapshot date cannot be in the future.")
+        row = db.execute(
+            text("SELECT 1 FROM suppliers WHERE node_name = :n LIMIT 1"),
+            {"n": node_name},
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Unknown supplier node: {node_name}")
+
+        rows, generated = ensure_snapshot_for_node(db, node_name, snapshot_date, SOURCE_ON_DEMAND)
+        if len(rows) < 14:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Could not build a 14-day forecast snapshot for '{node_name}' on {snapshot_date}.",
+            )
+
+        horizon_days = [r["ds"] if not isinstance(r["ds"], datetime) else r["ds"].date() for r in rows]
+        actuals_map = (
+            fetch_actuals_for_horizon(db, node_name, horizon_days) if include_actuals else {}
+        )
+
+        points: List[ForecastSnapshotPoint] = []
+        for r in rows:
+            ds = r["ds"]
+            if isinstance(ds, datetime):
+                ds = ds.date()
+            y_act = None
+            if include_actuals:
+                y_act = None if ds > today else actuals_map.get(ds, 0.0)
+            points.append(
+                ForecastSnapshotPoint(
+                    ds=ds,
+                    yhat=float(r["yhat"]),
+                    yhat_lower=float(r["yhat_lower"]),
+                    yhat_upper=float(r["yhat_upper"]),
+                    y_actual=y_act,
+                )
+            )
+
+        mae = None
+        completed = 0
+        if include_actuals:
+            mae, completed, _ = compute_accuracy_metrics([p.model_dump() for p in points], today)
+
+        return ForecastSnapshotResponse(
+            node_name=node_name,
+            forecast_date=snapshot_date,
+            points=points,
+            generated_on_demand=generated,
+            mae=mae,
+            completed_days=completed,
+            horizon_days=len(points),
+        )
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    except Exception as e:
+        logger.error("forecast_snapshot failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+def _run_snapshot_job_sync(forecast_date: date) -> None:
+    if SessionLocal is None:
+        logger.error("SessionLocal not configured; skip snapshot job")
+        return
+    from src.forecast_snapshots import SOURCE_SCHEDULED, snapshot_all_nodes_for_date
+
+    s = SessionLocal()
+    try:
+        snapshot_all_nodes_for_date(s, forecast_date, SOURCE_SCHEDULED)
+    except Exception as e:
+        logger.error("Background forecast snapshot job failed: %s", e, exc_info=True)
+    finally:
+        s.close()
+
+
+@app.post("/admin/forecast-snapshots/run", tags=["Admin"])
+def admin_run_forecast_snapshots(
+    background_tasks: BackgroundTasks,
+    forecast_date: Optional[date] = Query(
+        None,
+        description="Defaults to today (UTC). Generates Prophet snapshots for all suppliers.",
+    ),
+):
+    """Queue daily snapshot generation for all supplier nodes (non-blocking)."""
+    from src.forecast_snapshots import utc_today
+
+    fd = forecast_date or utc_today()
+    background_tasks.add_task(_run_snapshot_job_sync, fd)
+    return {"status": "queued", "forecast_date": fd.isoformat()}
+
+
 @app.get("/events/forecasted", response_model=List[Event], tags=["Events"])
 def get_forecasted_events(
     count: int = Query(50, description="Number of forecasted events to retrieve", ge=1, le=200),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
 ):
     """
     Retrieves events that are PREDICTIVE (about future events like upcoming hurricanes, strikes).
@@ -741,17 +1027,25 @@ def get_forecasted_events(
     Only includes events with valid latitude, longitude, and future predicted dates.
     """
     try:
+        if as_of is not None and as_of > date.today():
+            raise HTTPException(status_code=400, detail="as_of cannot be in the future.")
         criticality_map = get_criticality_map(db)
-        
+        as_filter = ""
+        params = {"count": count}
+        if as_of is not None:
+            as_filter = "AND article_timestamp::date <= :as_of"
+            params["as_of"] = as_of
+
         # Query for events with predictive temporal information
         # We're using jsonb operators to filter for is_predictive = true
-        query = text("""
+        query = text(f"""
             SELECT * FROM events
             WHERE latitude IS NOT NULL 
             AND longitude IS NOT NULL
             AND temporal_info IS NOT NULL
             AND temporal_info->>'is_predictive' = 'true'
             AND temporal_info->>'predicted_date' IS NOT NULL
+            {as_filter}
             ORDER BY 
                 CASE 
                     WHEN temporal_info->>'predicted_date' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
@@ -760,7 +1054,7 @@ def get_forecasted_events(
                 END ASC
             LIMIT :count;
         """)
-        result = db.execute(query, {"count": count}).fetchall()
+        result = db.execute(query, params).fetchall()
         
         events = process_events_with_impact(result, criticality_map)
         logger.info(f"✅ Retrieved {len(events)} forecasted events")
@@ -774,16 +1068,24 @@ def get_forecasted_events(
 def get_forecasted_events_by_node(
     node_name: str,
     limit: int = Query(50, description="Max number of forecasted events for the node", ge=1, le=200),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
 ):
     """
     Retrieves PREDICTIVE events for a specific node.
     These are events that predict future occurrences (hurricanes, strikes, etc).
     """
     try:
+        if as_of is not None and as_of > date.today():
+            raise HTTPException(status_code=400, detail="as_of cannot be in the future.")
         criticality_map = get_criticality_map(db)
-        
-        query = text("""
+        as_filter = ""
+        params = {"node_name": node_name, "limit": limit}
+        if as_of is not None:
+            as_filter = "AND article_timestamp::date <= :as_of"
+            params["as_of"] = as_of
+
+        query = text(f"""
             SELECT * FROM events
             WHERE matched_node = :node_name
             AND latitude IS NOT NULL 
@@ -791,6 +1093,7 @@ def get_forecasted_events_by_node(
             AND temporal_info IS NOT NULL
             AND temporal_info->>'is_predictive' = 'true'
             AND temporal_info->>'predicted_date' IS NOT NULL
+            {as_filter}
             ORDER BY 
                 CASE 
                     WHEN temporal_info->>'predicted_date' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
@@ -799,7 +1102,7 @@ def get_forecasted_events_by_node(
                 END ASC
             LIMIT :limit;
         """)
-        result = db.execute(query, {"node_name": node_name, "limit": limit}).fetchall()
+        result = db.execute(query, params).fetchall()
         
         events = process_events_with_impact(result, criticality_map)
         logger.info(f"✅ Retrieved {len(events)} forecasted events for node '{node_name}'")

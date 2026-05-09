@@ -21,25 +21,29 @@ import { mapDisruptionEvent, mapSupplier } from '@/lib/dataMappers';
 export default function WorldMapDashboard() {
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
   const [filterCountry, setFilterCountry] = useState<string>('all');
+  /** YYYY-MM-DD UTC calendar day, or '' for live data */
+  const [rewindDate, setRewindDate] = useState<string>('');
+
+  const asOf = rewindDate || undefined;
 
   const suppliersQuery = useQuery({
-    queryKey: ['suppliers'],
-    queryFn: api.getSuppliers,
+    queryKey: ['suppliers', rewindDate],
+    queryFn: () => api.getSuppliers(asOf),
   });
 
   const summaryQuery = useQuery({
-    queryKey: ['summary'],
-    queryFn: api.getSummary,
+    queryKey: ['summary', rewindDate],
+    queryFn: () => api.getSummary(asOf),
   });
 
   const forecastedEventsQuery = useQuery({
-    queryKey: ['events', 'forecasted', 200],
-    queryFn: () => api.getForecastedEvents(200),
+    queryKey: ['events', 'forecasted', 200, rewindDate],
+    queryFn: () => api.getForecastedEvents(200, asOf),
   });
 
   const supplierEventsQuery = useQuery({
-    queryKey: ['events', selectedSupplier?.id],
-    queryFn: () => api.getEventsByNode(selectedSupplier!.id, 20),
+    queryKey: ['events', selectedSupplier?.id, rewindDate],
+    queryFn: () => api.getEventsByNode(selectedSupplier!.id, 20, asOf),
     enabled: Boolean(selectedSupplier?.id),
   });
 
@@ -73,7 +77,11 @@ export default function WorldMapDashboard() {
     <div className="flex-1 flex flex-col h-screen overflow-hidden">
       <Header
         title="World Map Dashboard"
-        subtitle="Global supply chain monitoring"
+        subtitle={
+          rewindDate
+            ? `Rewind: data as of ${rewindDate} (UTC calendar day)`
+            : 'Global supply chain monitoring (live)'
+        }
       />
 
       <div className="flex-1 flex overflow-hidden">
@@ -115,7 +123,25 @@ export default function WorldMapDashboard() {
           )}
 
           {/* Filter Bar */}
-          <div className="flex items-center gap-4 mb-4">
+          <div className="flex flex-wrap items-center gap-4 mb-4">
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground whitespace-nowrap">As of (UTC):</span>
+              <input
+                type="date"
+                className="h-9 rounded-md border border-border bg-secondary/50 px-3 text-sm text-foreground"
+                value={rewindDate}
+                max={new Date().toISOString().slice(0, 10)}
+                onChange={(e) => setRewindDate(e.target.value)}
+              />
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                onClick={() => setRewindDate('')}
+              >
+                Live
+              </Button>
+            </div>
             <div className="flex items-center gap-2">
               <Filter className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">Filter by country:</span>
@@ -133,8 +159,8 @@ export default function WorldMapDashboard() {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="outline" size="sm">
-              Clear Filters
+            <Button variant="outline" size="sm" type="button" onClick={() => setFilterCountry('all')}>
+              Clear country
             </Button>
             {suppliersQuery.isLoading && (
               <span className="text-sm text-muted-foreground">Loading suppliers...</span>

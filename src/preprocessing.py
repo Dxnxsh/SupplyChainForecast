@@ -18,7 +18,22 @@ ML_CLASSIFIER_PATH = os.getenv("ML_CLASSIFIER_PATH", "model_training/classifier.
 
 
 def _select_torch_device():
-    """Select the best available torch device for transformers pipeline."""
+    """
+    Select device for Hugging Face NER pipeline.
+    Order: env TORCH_DEVICE (cuda|mps|cpu), then CUDA, then Apple Metal (MPS), then CPU.
+    On MacBook, MPS is used automatically when available; set TORCH_DEVICE=cpu to force CPU.
+    """
+    forced = (os.getenv("TORCH_DEVICE") or "").strip().lower()
+    if forced == "cpu":
+        return -1, "cpu"
+    if forced == "cuda":
+        if torch.cuda.is_available():
+            return 0, "cuda"
+        print("⚠️ TORCH_DEVICE=cuda requested but CUDA is not available; using auto selection.")
+    if forced == "mps":
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            return "mps", "mps"
+        print("⚠️ TORCH_DEVICE=mps requested but MPS is not available; using auto selection.")
     if torch.cuda.is_available():
         return 0, "cuda"
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
@@ -54,7 +69,13 @@ try:
         grouped_entities=True,
         device=ner_device
     )
-    print(f"Hugging Face NER model loaded on {ner_device_name.upper()} with batch size {NER_BATCH_SIZE}. 🤖")
+    if ner_device_name == "mps":
+        print(
+            f"Hugging Face NER model loaded on Apple Metal (MPS) with batch size {NER_BATCH_SIZE}. "
+            "If you see errors, try: export PYTORCH_ENABLE_MPS_FALLBACK=1"
+        )
+    else:
+        print(f"Hugging Face NER model loaded on {ner_device_name.upper()} with batch size {NER_BATCH_SIZE}.")
 except Exception as e:
     print(f"❌ Error loading Hugging Face NER model: {e}")
     print("Check internet connection and ensure `transformers` and `torch` are installed.")

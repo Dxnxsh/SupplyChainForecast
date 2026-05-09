@@ -33,6 +33,43 @@ def get_db_engine():
         print(f"❌ Error connecting to the database: {e}")
         return None
 
+
+def fetch_existing_article_urls(engine, urls: list) -> set:
+    """Return article_url values that already exist in events (chunked IN queries)."""
+    if not urls:
+        return set()
+    # Dedupe while keeping stable order
+    unique = list(dict.fromkeys(str(u) for u in urls if u))
+    if not unique:
+        return set()
+    from sqlalchemy import bindparam
+
+    found: set = set()
+    chunk_size = 400
+    stmt = text("SELECT article_url FROM events WHERE article_url IN :url_list").bindparams(
+        bindparam("url_list", expanding=True)
+    )
+    with engine.connect() as conn:
+        for i in range(0, len(unique), chunk_size):
+            chunk = unique[i : i + chunk_size]
+            result = conn.execute(stmt, {"url_list": chunk})
+            found.update(row[0] for row in result if row[0])
+    return found
+
+
+def filter_new_events_by_url(engine, events_data: list) -> tuple:
+    """
+    Drop events whose article_url is already in the database (avoids duplicate enrichment work).
+    Returns (new_events, skipped_count). Upsert still dedupes on conflict if you skip this filter.
+    """
+    if not events_data:
+        return [], 0
+    urls = [e.get("article_url") for e in events_data if e.get("article_url")]
+    existing = fetch_existing_article_urls(engine, urls)
+    new_events = [e for e in events_data if e.get("article_url") and e["article_url"] not in existing]
+    skipped = len(events_data) - len(new_events)
+    return new_events, skipped
+
 def create_tables(engine):
     """Creates the 'suppliers' and 'events' tables if they do not already exist."""
     metadata = MetaData()

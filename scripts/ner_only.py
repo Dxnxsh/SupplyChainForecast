@@ -9,7 +9,12 @@ Use on Google Colab with a GPU runtime:
 
 From repo root locally:
   python scripts/ner_only.py -i data/sample.txt
+  python scripts/ner_only.py --raw-dir data/raw/web_scrape -o data/ner/locations.jsonl
+  python scripts/ner_only.py -i data/raw/web_scrape/all_news_q4_2025.json -o out.jsonl
   python scripts/ner_only.py -i articles.jsonl --text-field text -o locations.jsonl
+
+Your raw scrape files are a JSON *array* at the root ([ {...}, {...} ]), not JSONL.
+Use --raw-dir or point -i at one of those .json files.
 
 Env:
   NER_MODEL        default: dbmdz/bert-large-cased-finetuned-conll03-english
@@ -22,8 +27,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
+from typing import Optional, Tuple
+
+# (article_url or None, full text) — matches web_scrape `label` + `text` rows
+Document = Tuple[Optional[str], str]
 
 
 def _select_device():
@@ -47,27 +57,86 @@ def _select_device():
     return -1
 
 
-def _load_texts_from_input(path: Path, text_field: str) -> list[str]:
-    texts: list[str] = []
+def _clean_control_chars(content: str) -> str:
+    """Same idea as preprocessing.load_raw_data — strips ASCII controls that break json.loads."""
+    return re.sub(r"[\x00-\x1f]", "", content)
+
+
+def _entry_to_url_and_text(entry: dict, text_field: str) -> Optional[Document]:
+    if not isinstance(entry, dict):
+        return None
+    raw = entry.get(text_field)
+    if raw is None or not str(raw).strip():
+        return None
+    label = entry.get("label") or ""
+    parts = str(label).split(";")
+    url = parts[2].strip() if len(parts) > 2 else ""
+    return (url if url else None, str(raw))
+
+
+def load_web_scrape_json_array(path: Path, text_field: str) -> list[Document]:
+    """One file whose root is a JSON array of objects with label + text (your raw exports)."""
     with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            if line.startswith("{"):
-                try:
-                    obj = json.loads(line)
-                    t = obj.get(text_field)
-                    if t is not None:
-                        texts.append(str(t))
-                except json.JSONDecodeError:
-                    texts.append(line)
-            else:
-                texts.append(line)
-    return texts
+        content = _clean_control_chars(f.read())
+    data = json.loads(content)
+    if not isinstance(data, list):
+        print(f"⚠️ Expected JSON array in {path}; got {type(data).__name__}.", file=sys.stderr)
+        return []
+    out: list[Document] = []
+    for entry in data:
+        doc = _entry_to_url_and_text(entry, text_field)
+        if doc:
+            out.append(doc)
+    return out
 
 
-def _truncate(s: str, max_chars: int | None) -> str:
+def load_web_scrape_directory(dir_path: Path, text_field: str) -> list[Document]:
+    """All *.json in folder (same format as data/raw/web_scrape/)."""
+    paths = sorted(dir_path.glob("*.json"))
+    if not paths:
+        print(f"No .json files in {dir_path}", file=sys.stderr)
+        return []
+    out: list[Document] = []
+    for p in paths:
+        out.extend(load_web_scrape_json_array(p, text_field))
+        print(f"  Loaded {p.name}: cumulative {len(out)} article(s)", file=sys.stderr)
+    return out
+
+
+def load_line_or_jsonl_input(path: Path, text_field: str) -> list[Document]:
+    """JSONL (one object per line) or plain text lines — no URL metadata."""
+    docs: list[Document] = []
+    with path.open(encoding="utf-8") as f:
+        full = f.read()
+    stripped = full.strip()
+    if stripped.startswith("["):
+        return load_web_scrape_json_array(path, text_field)
+
+    for line in full.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("{"):
+            try:
+                obj = json.loads(line)
+                t = obj.get(text_field)
+                if t is not None:
+                    url = None
+                    lab = obj.get("label")
+                    if lab:
+                        parts = str(lab).split(";")
+                        if len(parts) > 2:
+                            u = parts[2].strip()
+                            url = u if u else None
+                    docs.append((url, str(t)))
+            except json.JSONDecodeError:
+                docs.append((None, line))
+        else:
+            docs.append((None, line))
+    return docs
+
+
+def _truncate(s: str, max_chars: Optional[int]) -> str:
     if max_chars is None or max_chars <= 0:
         return s
     return s if len(s) <= max_chars else s[:max_chars]
@@ -86,10 +155,16 @@ def main() -> int:
         default=int(os.getenv("NER_BATCH_SIZE", "32")),
     )
     parser.add_argument(
+        "--raw-dir",
+        type=Path,
+        metavar="DIR",
+        help="Folder of web_scrape *.json files (root JSON array per file)",
+    )
+    parser.add_argument(
         "--input",
         "-i",
         type=Path,
-        help="UTF-8 file: one JSON object per line (--text-field) or one plain text paragraph per line",
+        help="Line-based JSONL/plain text, OR one web_scrape-style JSON array file",
     )
     parser.add_argument(
         "--text-field",
@@ -108,6 +183,13 @@ def main() -> int:
         type=int,
         default=12_000,
         help="Truncate each document to this many characters before NER (0 = no truncation)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Process only the first N articles (after loading)",
     )
     args = parser.parse_args()
 
@@ -140,27 +222,49 @@ def main() -> int:
     out_f = open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
     try:
         if args.text:
+            if args.input or args.raw_dir:
+                print("Use either --text or (--input / --raw-dir), not both.", file=sys.stderr)
+                return 2
             locs = extract_batch([args.text])[0]
             rec = {"locations": locs, "text_preview": args.text[:500]}
             out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             return 0
 
-        if not args.input:
-            print("Provide --text or --input", file=sys.stderr)
+        if bool(args.raw_dir) == bool(args.input):
+            print("Provide exactly one of: --text | --input | --raw-dir", file=sys.stderr)
             return 2
 
-        texts = _load_texts_from_input(args.input, args.text_field)
-        if not texts:
+        if args.raw_dir:
+            if not args.raw_dir.is_dir():
+                print(f"Not a directory: {args.raw_dir}", file=sys.stderr)
+                return 2
+            print(f"Loading raw JSON arrays from {args.raw_dir}...", file=sys.stderr)
+            documents = load_web_scrape_directory(args.raw_dir, args.text_field)
+        else:
+            assert args.input is not None
+            if not args.input.is_file():
+                print(f"Not a file: {args.input}", file=sys.stderr)
+                return 2
+            documents = load_line_or_jsonl_input(args.input, args.text_field)
+
+        if args.limit is not None:
+            documents = documents[: max(0, args.limit)]
+
+        if not documents:
             print("No texts loaded.", file=sys.stderr)
             return 1
 
+        texts = [t for _, t in documents]
         bs = max(1, args.batch_size)
         for start in range(0, len(texts), bs):
-            chunk = texts[start : start + bs]
-            for text, locs in zip(chunk, extract_batch(chunk)):
+            chunk_docs = documents[start : start + bs]
+            chunk_texts = [t for _, t in chunk_docs]
+            for (url, text), locs in zip(chunk_docs, extract_batch(chunk_texts)):
                 rec = {"locations": locs, "text_preview": text[:500]}
+                if url:
+                    rec["article_url"] = url
                 out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-        print(f"Processed {len(texts)} document(s).", file=sys.stderr)
+        print(f"Processed {len(documents)} document(s).", file=sys.stderr)
         return 0
     finally:
         if args.output:

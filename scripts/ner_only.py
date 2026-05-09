@@ -119,7 +119,12 @@ def main() -> int:
 
     from transformers import pipeline
 
-    ner = pipeline("ner", model=args.model, grouped_entities=True, device=device)
+    ner = pipeline(
+        "ner",
+        model=args.model,
+        aggregation_strategy="simple",
+        device=device,
+    )
 
     def extract_batch(texts: list[str]) -> list[list[str]]:
         if not texts:

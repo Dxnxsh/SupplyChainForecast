@@ -66,8 +66,8 @@ try:
     ner_pipeline = pipeline(
         "ner",
         model="dbmdz/bert-large-cased-finetuned-conll03-english",
-        grouped_entities=True,
-        device=ner_device
+        aggregation_strategy="simple",
+        device=ner_device,
     )
     if ner_device_name == "mps":
         print(

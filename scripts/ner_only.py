@@ -3,7 +3,7 @@
 Standalone location NER only (same HF model family as src/preprocessing.py).
 
 Use on Google Colab with a GPU runtime:
-  !pip install -q transformers accelerate
+  !pip install -q transformers accelerate datasets
   import os; os.environ["TORCH_DEVICE"] = "cuda"
   !python scripts/ner_only.py -t "Flooding near the Port of Long Beach."
 
@@ -18,7 +18,7 @@ Use --raw-dir or point -i at one of those .json files.
 
 Env:
   NER_MODEL        default: dbmdz/bert-large-cased-finetuned-conll03-english
-  NER_BATCH_SIZE   default: 32
+  NER_BATCH_SIZE   default: 48 on CUDA (~15GB VRAM), 16 on MPS/CPU unless set
   TORCH_DEVICE     cuda | mps | cpu (optional override)
 """
 
@@ -34,6 +34,21 @@ from typing import Optional, Tuple
 
 # (article_url or None, full text) — matches web_scrape `label` + `text` rows
 Document = Tuple[Optional[str], str]
+
+
+def _default_ner_batch_size() -> int:
+    """CUDA: 48 fits ~15GB VRAM for bert-large NER; lower default on MPS/CPU."""
+    env = os.getenv("NER_BATCH_SIZE")
+    if env:
+        return int(env)
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            return 48
+    except ImportError:
+        pass
+    return 16
 
 
 def _select_device():
@@ -142,6 +157,42 @@ def _truncate(s: str, max_chars: Optional[int]) -> str:
     return s if len(s) <= max_chars else s[:max_chars]
 
 
+def ner_loc_predictions(
+    ner_pipe,
+    texts: list[str],
+    *,
+    batch_size: int,
+    max_chars: Optional[int],
+):
+    """
+    Run token-classification NER and return raw entity lists per row.
+    Uses Hugging Face Dataset + KeyDataset on GPU so the pipeline batches efficiently
+    (avoids the 'sequentially on GPU' warning).
+    """
+    if not texts:
+        return []
+    trimmed = [_truncate(t, max_chars) for t in texts]
+    bs = max(1, min(batch_size, len(trimmed)))
+
+    try:
+        from datasets import Dataset
+        from transformers.pipelines.pt_utils import KeyDataset
+
+        ds = Dataset.from_dict({"text": trimmed})
+        predictions = ner_pipe(KeyDataset(ds, "text"), batch_size=bs)
+    except ImportError:
+        predictions = ner_pipe(trimmed, batch_size=bs)
+
+    if not isinstance(predictions, list):
+        predictions = list(predictions)
+
+    out: list[list[str]] = []
+    for entities in predictions:
+        locs = [e["word"] for e in entities if e.get("entity_group") == "LOC"]
+        out.append(list(dict.fromkeys(locs)))
+    return out
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="HF NER: LOC entities only (Colab/local).")
     parser.add_argument(
@@ -152,7 +203,9 @@ def main() -> int:
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=int(os.getenv("NER_BATCH_SIZE", "32")),
+        default=_default_ner_batch_size(),
+        help="Micro-batch for inference; default 48 on CUDA (~15GB VRAM), 16 on MPS/CPU "
+        "(override with NER_BATCH_SIZE). Lower if CUDA OOM.",
     )
     parser.add_argument(
         "--raw-dir",
@@ -191,6 +244,11 @@ def main() -> int:
         metavar="N",
         help="Process only the first N articles (after loading)",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable the tqdm progress bar (for logs / piping)",
+    )
     args = parser.parse_args()
 
     max_chars = None if args.max_chars == 0 else args.max_chars
@@ -198,6 +256,10 @@ def main() -> int:
     device = _select_device()
     dev_name = "cpu" if device == -1 else ("cuda" if device == 0 else str(device))
     print(f"Loading NER model {args.model!r} on {dev_name}...", file=sys.stderr)
+    print(
+        f"NER batch size {args.batch_size} (env NER_BATCH_SIZE; reduce if OOM)",
+        file=sys.stderr,
+    )
 
     from transformers import pipeline
 
@@ -208,24 +270,15 @@ def main() -> int:
         device=device,
     )
 
-    def extract_batch(texts: list[str]) -> list[list[str]]:
-        if not texts:
-            return []
-        trimmed = [_truncate(t, max_chars) for t in texts]
-        predictions = ner(trimmed, batch_size=args.batch_size)
-        out: list[list[str]] = []
-        for entities in predictions:
-            locs = [e["word"] for e in entities if e.get("entity_group") == "LOC"]
-            out.append(list(dict.fromkeys(locs)))
-        return out
-
     out_f = open(args.output, "w", encoding="utf-8") if args.output else sys.stdout
     try:
         if args.text:
             if args.input or args.raw_dir:
                 print("Use either --text or (--input / --raw-dir), not both.", file=sys.stderr)
                 return 2
-            locs = extract_batch([args.text])[0]
+            locs = ner_loc_predictions(
+                ner, [args.text], batch_size=args.batch_size, max_chars=max_chars
+            )[0]
             rec = {"locations": locs, "text_preview": args.text[:500]}
             out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             return 0
@@ -256,14 +309,47 @@ def main() -> int:
 
         texts = [t for _, t in documents]
         bs = max(1, args.batch_size)
-        for start in range(0, len(texts), bs):
-            chunk_docs = documents[start : start + bs]
-            chunk_texts = [t for _, t in chunk_docs]
-            for (url, text), locs in zip(chunk_docs, extract_batch(chunk_texts)):
-                rec = {"locations": locs, "text_preview": text[:500]}
-                if url:
-                    rec["article_url"] = url
-                out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            tqdm = None  # type: ignore
+
+        use_bar = tqdm is not None and not args.no_progress
+        pbar = (
+            tqdm(
+                total=len(documents),
+                desc="NER",
+                unit="article",
+                file=sys.stderr,
+                mininterval=0.5,
+            )
+            if use_bar
+            else None
+        )
+        try:
+            for start in range(0, len(texts), bs):
+                chunk_docs = documents[start : start + bs]
+                chunk_texts = [t for _, t in chunk_docs]
+                for (url, text), locs in zip(
+                    chunk_docs,
+                    ner_loc_predictions(
+                        ner,
+                        chunk_texts,
+                        batch_size=args.batch_size,
+                        max_chars=max_chars,
+                    ),
+                ):
+                    rec = {"locations": locs, "text_preview": text[:500]}
+                    if url:
+                        rec["article_url"] = url
+                    out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+                    if pbar is not None:
+                        pbar.update(1)
+        finally:
+            if pbar is not None:
+                pbar.close()
+
         print(f"Processed {len(documents)} document(s).", file=sys.stderr)
         return 0
     finally:

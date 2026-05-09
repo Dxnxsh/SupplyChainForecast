@@ -53,9 +53,11 @@ def geocode_location_with_retry(location_name):
     # Simple cache to avoid re-querying the same location within a single run
     if location_name.lower() in geocode_location_with_retry.cache:
         cached_result = geocode_location_with_retry.cache[location_name.lower()]
+        geocode_location_with_retry.last_was_cache = True
         # print(f"  Cache hit for '{location_name}': {cached_result}")
         return cached_result if cached_result else (None, None)
 
+    geocode_location_with_retry.last_was_cache = False
     for attempt in range(RETRY_ATTEMPTS):
         try:
             # print(f"  Attempt {attempt + 1} to geocode: {location_name}")
@@ -86,6 +88,7 @@ def geocode_location_with_retry(location_name):
 
 # Initialize the cache
 geocode_location_with_retry.cache = load_geocode_cache()
+geocode_location_with_retry.last_was_cache = False
 
 # --- Core Geocoding Logic ---
 def load_scored_data(filepath="data/processed/scored_events.jsonl"):
@@ -106,6 +109,8 @@ def geocode_events(scored_events):
     geocoded_events = []
     skipped_count = 0
     geocoded_count = 0
+    cache_hits = 0
+    network_lookups = 0
     
     # Reset cache for each run
     geocode_location_with_retry.cache = load_geocode_cache() 
@@ -126,6 +131,10 @@ def geocode_events(scored_events):
 
         # --- If location text exists, proceed with geocoding ---
         latitude, longitude = geocode_location_with_retry(location_to_geocode)
+        if geocode_location_with_retry.last_was_cache:
+            cache_hits += 1
+        else:
+            network_lookups += 1
 
         # Add geocoding results to the event dictionary
         event['latitude'] = latitude
@@ -140,8 +149,9 @@ def geocode_events(scored_events):
         # else: # No need to print warning here if fallback was intended or no coords found
             # print(f"⚠️ Could not geocode or find fallback for event (URL: {event.get('article_url')}, Location Text: {location_to_geocode}). Lat/Lon set to None.")
 
-        # Add a small delay between requests to be polite to Nominatim
-        time.sleep(1.1) # Slightly more than 1 second to be safe
+        # Add a small delay only for real Nominatim lookups.
+        if not geocode_location_with_retry.last_was_cache:
+            time.sleep(1.1) # Slightly more than 1 second to be safe
 
         if (i + 1) % 50 == 0: # Print progress less frequently
             print(f"   Processed {i+1}/{len(scored_events)} events...")
@@ -151,6 +161,8 @@ def geocode_events(scored_events):
     print(f"\n✅ Geocoding complete.")
     print(f"   Successfully geocoded (or used fallback for) {geocoded_count} events.")
     print(f"   Skipped {skipped_count} events due to missing location text.")
+    print(f"   Cache hits: {cache_hits}")
+    print(f"   Network lookups: {network_lookups}")
     print(f"   Total events in output: {len(geocoded_events)}")
     return geocoded_events
 

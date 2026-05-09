@@ -2,10 +2,13 @@
 """
 Standalone location NER only (same HF model family as src/preprocessing.py).
 
-Use on Google Colab with a GPU runtime:
-  !pip install -q transformers accelerate datasets
+Use on Google Colab with a GPU runtime (e.g. T4):
+  !pip install -q transformers accelerate datasets tqdm
   import os; os.environ["TORCH_DEVICE"] = "cuda"
   !python scripts/ner_only.py -t "Flooding near the Port of Long Beach."
+
+One pipeline pass over the full corpus avoids Transformers' "sequentially on GPU"
+warning (it fires after the 11th pipeline.__call__, not because of lists vs Dataset).
 
 From repo root locally:
   python scripts/ner_only.py -i data/sample.txt
@@ -157,7 +160,7 @@ def _truncate(s: str, max_chars: Optional[int]) -> str:
     return s if len(s) <= max_chars else s[:max_chars]
 
 
-def ner_loc_predictions(
+def iter_ner_location_lists(
     ner_pipe,
     texts: list[str],
     *,
@@ -165,12 +168,15 @@ def ner_loc_predictions(
     max_chars: Optional[int],
 ):
     """
-    Run token-classification NER and return raw entity lists per row.
-    Uses Hugging Face Dataset + KeyDataset on GPU so the pipeline batches efficiently
-    (avoids the 'sequentially on GPU' warning).
+    Run NER once over all texts and yield one LOC list per row.
+
+    Important: Hugging Face Pipeline increments an internal call counter on every
+    ``__call__``. After the 11th call on CUDA it warns about "sequentially on GPU"
+    — even when each call uses a Dataset. So we must use **one** pipeline invocation
+    per corpus (batched inside via KeyDataset + DataLoader), not one call per chunk.
     """
     if not texts:
-        return []
+        return
     trimmed = [_truncate(t, max_chars) for t in texts]
     bs = max(1, min(batch_size, len(trimmed)))
 
@@ -183,14 +189,11 @@ def ner_loc_predictions(
     except ImportError:
         predictions = ner_pipe(trimmed, batch_size=bs)
 
-    if not isinstance(predictions, list):
-        predictions = list(predictions)
+    pred_iter = predictions if not isinstance(predictions, list) else iter(predictions)
 
-    out: list[list[str]] = []
-    for entities in predictions:
+    for entities in pred_iter:
         locs = [e["word"] for e in entities if e.get("entity_group") == "LOC"]
-        out.append(list(dict.fromkeys(locs)))
-    return out
+        yield list(dict.fromkeys(locs))
 
 
 def main() -> int:
@@ -276,9 +279,14 @@ def main() -> int:
             if args.input or args.raw_dir:
                 print("Use either --text or (--input / --raw-dir), not both.", file=sys.stderr)
                 return 2
-            locs = ner_loc_predictions(
-                ner, [args.text], batch_size=args.batch_size, max_chars=max_chars
-            )[0]
+            locs = next(
+                iter_ner_location_lists(
+                    ner,
+                    [args.text],
+                    batch_size=args.batch_size,
+                    max_chars=max_chars,
+                )
+            )
             rec = {"locations": locs, "text_preview": args.text[:500]}
             out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
             return 0
@@ -308,7 +316,6 @@ def main() -> int:
             return 1
 
         texts = [t for _, t in documents]
-        bs = max(1, args.batch_size)
 
         try:
             from tqdm import tqdm
@@ -316,39 +323,27 @@ def main() -> int:
             tqdm = None  # type: ignore
 
         use_bar = tqdm is not None and not args.no_progress
-        pbar = (
-            tqdm(
+        loc_iter = iter_ner_location_lists(
+            ner,
+            texts,
+            batch_size=args.batch_size,
+            max_chars=max_chars,
+        )
+        if use_bar:
+            loc_iter = tqdm(
+                loc_iter,
                 total=len(documents),
                 desc="NER",
                 unit="article",
                 file=sys.stderr,
                 mininterval=0.5,
             )
-            if use_bar
-            else None
-        )
-        try:
-            for start in range(0, len(texts), bs):
-                chunk_docs = documents[start : start + bs]
-                chunk_texts = [t for _, t in chunk_docs]
-                for (url, text), locs in zip(
-                    chunk_docs,
-                    ner_loc_predictions(
-                        ner,
-                        chunk_texts,
-                        batch_size=args.batch_size,
-                        max_chars=max_chars,
-                    ),
-                ):
-                    rec = {"locations": locs, "text_preview": text[:500]}
-                    if url:
-                        rec["article_url"] = url
-                    out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                    if pbar is not None:
-                        pbar.update(1)
-        finally:
-            if pbar is not None:
-                pbar.close()
+
+        for (url, text), locs in zip(documents, loc_iter):
+            rec = {"locations": locs, "text_preview": text[:500]}
+            if url:
+                rec["article_url"] = url
+            out_f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
         print(f"Processed {len(documents)} document(s).", file=sys.stderr)
         return 0

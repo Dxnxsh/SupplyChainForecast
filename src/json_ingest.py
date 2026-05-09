@@ -36,6 +36,7 @@ def entries_to_scored_events(
     entries: list,
     vectorizer,
     model,
+    label_encoder=None,
     *,
     limit: int | None = None,
 ) -> list[dict]:
@@ -56,6 +57,7 @@ def entries_to_scored_events(
             meta["original_text"] or "",
             vectorizer,
             model,
+            label_encoder,
         )
         if ev:
             events.append(ev)
@@ -134,7 +136,7 @@ def run_json_ingest(
         print(f"No entries loaded from {raw_dir}")
         return 0
 
-    vectorizer, model = load_classifier(legacy_model_path)
+    vectorizer, model, label_encoder = load_classifier(legacy_model_path)
     disruption_payload = load_disruption_classifier(disruption_model_path)
     if disruption_model_path and not disruption_payload:
         print(f"⚠️ Disruption classifier not found at {disruption_model_path}; continuing without it.")
@@ -142,7 +144,7 @@ def run_json_ingest(
     if impact_model_path and not impact_payload:
         print(f"⚠️ Impact regressor not found at {impact_model_path}; continuing without it.")
 
-    batch = entries_to_scored_events(entries, vectorizer, model, limit=limit)
+    batch = entries_to_scored_events(entries, vectorizer, model, label_encoder, limit=limit)
     print(f"Scored {len(batch)} article(s) from JSON (legacy tri-class).")
 
     engine = None

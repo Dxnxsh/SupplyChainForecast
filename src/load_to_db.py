@@ -8,8 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime
 import pytz
 
-# --- Configuration ---
-DB_CONNECTION_STRING = os.getenv("DB_CONNECTION_STRING", "postgresql://postgres:your_password@localhost:5432/supply_chain_db")
+from src.db_config import DB_CONNECTION_STRING, DB_CONNECTION_STRING_LEGACY
 
 # --- Supplier Nodes Data with Criticality ---
 SUPPLIER_NODES = {
@@ -23,7 +22,7 @@ SUPPLIER_NODES = {
 }
 
 def get_db_engine():
-    """Establishes and returns a database engine."""
+    """Active database (DB_CONNECTION_STRING)."""
     try:
         engine = create_engine(DB_CONNECTION_STRING)
         with engine.connect() as connection:
@@ -31,6 +30,19 @@ def get_db_engine():
         return engine
     except SQLAlchemyError as e:
         print(f"❌ Error connecting to the database: {e}")
+        return None
+
+
+def get_legacy_db_engine():
+    if not DB_CONNECTION_STRING_LEGACY:
+        return None
+    try:
+        engine = create_engine(DB_CONNECTION_STRING_LEGACY)
+        with engine.connect():
+            print("✅ Legacy database connection successful.")
+        return engine
+    except SQLAlchemyError as e:
+        print(f"❌ Error connecting to the legacy database: {e}")
         return None
 
 
@@ -161,6 +173,20 @@ def ensure_events_impact_columns(engine):
         print("✅ Impact prediction columns verified on events table.")
     except SQLAlchemyError as e:
         print(f"⚠️ Could not ensure impact columns (may be non-Postgres): {e}")
+
+
+def ensure_events_sentiment_columns(engine):
+    stmts = [
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS sentiment_label VARCHAR(32);",
+        "ALTER TABLE events ADD COLUMN IF NOT EXISTS sentiment_score DOUBLE PRECISION;",
+    ]
+    try:
+        with engine.begin() as connection:
+            for stmt in stmts:
+                connection.execute(text(stmt))
+        print("✅ Sentiment columns verified on events table.")
+    except SQLAlchemyError as e:
+        print(f"⚠️ Could not ensure sentiment columns (may be non-Postgres): {e}")
 
 
 def load_geocoded_data(filepath="data/processed/temporal_enriched_events.jsonl"):
@@ -306,6 +332,7 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
     ensure_events_ml_columns(engine)
     ensure_events_risk_columns(engine)
     ensure_events_impact_columns(engine)
+    ensure_events_sentiment_columns(engine)
     insert_count = 0
     with engine.connect() as connection:
         print(f"Upserting {len(events_data)} event(s)...")
@@ -321,12 +348,14 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                 INSERT INTO events (
                     article_url, article_source, article_title, article_timestamp, event_text_segment,
                     potential_event_types, extracted_locations, matched_node, risk_score, risk_relevance_score, risk_severity_score, latitude, longitude,
-                    temporal_info, ml_risk_label, ml_risk_confidence, ml_risk_probabilities, predicted_disruption_probability, predicted_impact_score
+                    temporal_info, ml_risk_label, ml_risk_confidence, ml_risk_probabilities, predicted_disruption_probability, predicted_impact_score,
+                    sentiment_label, sentiment_score
                 )
                 VALUES (
                     :article_url, :article_source, :article_title, :article_timestamp, :event_text_segment,
                     :potential_event_types, :extracted_locations, :matched_node, :risk_score, :risk_relevance_score, :risk_severity_score, :latitude, :longitude,
-                    :temporal_info, :ml_risk_label, :ml_risk_confidence, :ml_risk_probabilities, :predicted_disruption_probability, :predicted_impact_score
+                    :temporal_info, :ml_risk_label, :ml_risk_confidence, :ml_risk_probabilities, :predicted_disruption_probability, :predicted_impact_score,
+                    :sentiment_label, :sentiment_score
                 )
                 ON CONFLICT (article_url) DO UPDATE SET
                     article_source = COALESCE(EXCLUDED.article_source, events.article_source),
@@ -346,7 +375,9 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                     ml_risk_confidence = COALESCE(EXCLUDED.ml_risk_confidence, events.ml_risk_confidence),
                     ml_risk_probabilities = COALESCE(EXCLUDED.ml_risk_probabilities, events.ml_risk_probabilities),
                     predicted_disruption_probability = COALESCE(EXCLUDED.predicted_disruption_probability, events.predicted_disruption_probability),
-                    predicted_impact_score = COALESCE(EXCLUDED.predicted_impact_score, events.predicted_impact_score);
+                    predicted_impact_score = COALESCE(EXCLUDED.predicted_impact_score, events.predicted_impact_score),
+                    sentiment_label = COALESCE(EXCLUDED.sentiment_label, events.sentiment_label),
+                    sentiment_score = COALESCE(EXCLUDED.sentiment_score, events.sentiment_score);
             """)
             try:
                 result = connection.execute(stmt, {
@@ -369,6 +400,8 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                     "ml_risk_probabilities": ml_risk_probabilities_json,
                     "predicted_disruption_probability": event.get('predicted_disruption_probability'),
                     "predicted_impact_score": event.get('predicted_impact_score'),
+                    "sentiment_label": event.get('sentiment_label'),
+                    "sentiment_score": event.get('sentiment_score'),
                 })
                 if result.rowcount > 0:
                     insert_count += 1
@@ -386,6 +419,7 @@ def populate_database(engine, events_data):
     ensure_events_ml_columns(engine)
     ensure_events_risk_columns(engine)
     ensure_events_impact_columns(engine)
+    ensure_events_sentiment_columns(engine)
     with engine.connect() as connection:
         print("Populating 'suppliers' table with criticality...")
         for node_name, details in SUPPLIER_NODES.items():

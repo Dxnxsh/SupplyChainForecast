@@ -2,11 +2,13 @@ import argparse
 import pickle
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from xgboost import XGBClassifier
 
 
 VALID_LABELS = {"LOW", "MEDIUM", "HIGH"}
@@ -84,13 +86,29 @@ def main():
         stratify=stratify_labels,
     )
 
+    label_encoder = LabelEncoder()
+    label_encoder.fit(combined["label"])
+    y_train_enc = label_encoder.transform(y_train)
+    y_test_enc = label_encoder.transform(y_test)
+
     vectorizer = TfidfVectorizer(ngram_range=(1, 2), max_features=10000)
     X_train_vec = vectorizer.fit_transform(X_train)
     X_test_vec = vectorizer.transform(X_test)
 
-    model = LogisticRegression(max_iter=1000, class_weight="balanced")
-    model.fit(X_train_vec, y_train)
-    y_pred = model.predict(X_test_vec)
+    n_class = len(label_encoder.classes_)
+    eval_metric = "logloss" if n_class == 2 else "mlogloss"
+    model = XGBClassifier(
+        n_estimators=200,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=args.random_state,
+        n_jobs=-1,
+        eval_metric=eval_metric,
+    )
+    model.fit(X_train_vec, y_train_enc)
+    y_pred = label_encoder.inverse_transform(np.asarray(model.predict(X_test_vec), dtype=int))
 
     print(f"Base rows: {len(base_df)}")
     print(f"Feedback rows used: {len(feedback_df)}")
@@ -100,7 +118,7 @@ def main():
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("wb") as f:
-        pickle.dump((vectorizer, model), f)
+        pickle.dump((vectorizer, model, label_encoder), f)
     print(f"Saved retrained model to: {output_path}")
 
 

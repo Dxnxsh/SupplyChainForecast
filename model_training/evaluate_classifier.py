@@ -3,6 +3,7 @@ import csv
 import pickle
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report, confusion_matrix
 
@@ -42,7 +43,14 @@ def main():
         raise ValueError("No valid manual labels found. Fill manual_label with LOW/MEDIUM/HIGH.")
 
     with model_path.open("rb") as f:
-        vectorizer, model = pickle.load(f)
+        payload = pickle.load(f)
+    if isinstance(payload, tuple) and len(payload) == 3:
+        vectorizer, model, label_encoder = payload
+    elif isinstance(payload, tuple) and len(payload) == 2:
+        vectorizer, model = payload
+        label_encoder = None
+    else:
+        raise ValueError("classifier.pkl must be a 2- or 3-tuple")
 
     labeled_df["input_text"] = (
         labeled_df["headline"].fillna("").astype(str)
@@ -50,9 +58,14 @@ def main():
         + labeled_df["text"].fillna("").astype(str).str[:300]
     )
     X = vectorizer.transform(labeled_df["input_text"])
-    preds = model.predict(X)
+    raw = model.predict(X)
+    if label_encoder is not None:
+        preds = label_encoder.inverse_transform(np.asarray(raw, dtype=int))
+        classes = [str(c) for c in label_encoder.classes_]
+    else:
+        preds = raw
+        classes = [str(c) for c in model.classes_]
     probs = model.predict_proba(X)
-    classes = list(model.classes_)
 
     labeled_df["pred_label"] = preds
     labeled_df["pred_confidence"] = probs.max(axis=1)

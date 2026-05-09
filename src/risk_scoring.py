@@ -1,12 +1,37 @@
 # src/risk_scoring.py
+# Default: FinBERT drives the sentiment multiplier in batch scoring. Set USE_FINBERT_RISK=0 for VADER.
+# Relevance and type weights unchanged.
 
 import json
 import os
 from datetime import datetime
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
-# --- NLP Model Initialization ---
-analyzer = SentimentIntensityAnalyzer()
+_vader_analyzer = None
+
+
+def _get_vader_analyzer():
+    global _vader_analyzer
+    if _vader_analyzer is None:
+        from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+        _vader_analyzer = SentimentIntensityAnalyzer()
+    return _vader_analyzer
+
+
+def _finbert_risk_enabled() -> bool:
+    v = (os.getenv("USE_FINBERT_RISK") or "1").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def sentiment_modifier_from_scalar(score: float) -> float:
+    """Map sentiment in [-1, 1] to severity multiplier (same thresholds as former VADER compound)."""
+    if score <= -0.5:
+        return 1.5
+    if score <= -0.1:
+        return 1.2
+    if score >= 0.5:
+        return 0.5
+    return 1.0
 
 # --- Configuration: Scoring Logic ---
 SCORE_WEIGHTS = {
@@ -69,12 +94,9 @@ def _contains_any_keyword(text, keywords):
 
 
 def get_sentiment_modifier(text):
-    """Returns a modifier based on sentiment compound score. Negative sentiment boosts risk, positive reduces it."""
-    score = analyzer.polarity_scores(text)['compound']
-    if score <= -0.5: return 1.5  # Very negative: +50%
-    if score <= -0.1: return 1.2  # Negative: +20%
-    if score >= 0.5: return 0.5   # Very positive (e.g., "strike resolved"): -50%
-    return 1.0                    # Neutral
+    """Negative sentiment boosts risk, positive reduces it (VADER fallback when FinBERT is off)."""
+    score = _get_vader_analyzer().polarity_scores(text)["compound"]
+    return sentiment_modifier_from_scalar(score)
 
 def get_urgency_modifier(text):
     """Returns a modifier based on urgency keywords. High urgency boosts risk, low reduces it."""
@@ -148,7 +170,13 @@ def calculate_severity_score(event):
     if base_score == 0:
         return 0.0
 
-    sentiment_mod = get_sentiment_modifier(event_text)
+    if _finbert_risk_enabled() and event.get("_finbert_sentiment_score") is not None:
+        try:
+            sentiment_mod = sentiment_modifier_from_scalar(float(event["_finbert_sentiment_score"]))
+        except (TypeError, ValueError):
+            sentiment_mod = get_sentiment_modifier(event_text)
+    else:
+        sentiment_mod = get_sentiment_modifier(event_text)
     urgency_mod = get_urgency_modifier(event_text)
     score_with_mods = base_score * sentiment_mod * urgency_mod
 
@@ -197,8 +225,20 @@ def calculate_risk_score(event):
 def score_all_events(events):
     """Iterates through all filtered events and calculates a risk score for each."""
     print(f"📈 Calculating enhanced risk scores for {len(events)} events...")
+    if _finbert_risk_enabled() and events:
+        from src.sentiment_finbert import batch_analyze_finbert
+
+        texts = [
+            f"{e.get('article_title', '')} {e.get('event_text_segment', '')}" for e in events
+        ]
+        fins = batch_analyze_finbert(texts)
+        for ev, f in zip(events, fins):
+            ev["_finbert_sentiment_score"] = f["sentiment_score"]
+            ev["sentiment_label"] = f["sentiment_label"]
+            ev["sentiment_score"] = f["sentiment_score"]
     for event in events:
         event.update(calculate_risk_components(event))
+        event.pop("_finbert_sentiment_score", None)
     print("✅ Risk scoring complete.")
     return events
 

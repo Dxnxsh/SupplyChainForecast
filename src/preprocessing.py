@@ -15,6 +15,7 @@ from transformers import pipeline
 # --- Performance Configuration ---
 NER_BATCH_SIZE = int(os.getenv("NER_BATCH_SIZE", "32"))
 ML_CLASSIFIER_PATH = os.getenv("ML_CLASSIFIER_PATH", "model_training/classifier.pkl")
+PROGRESS_EVERY_DOCS = int(os.getenv("PREPROCESS_PROGRESS_EVERY_DOCS", "25"))
 
 
 def _select_torch_device():
@@ -42,19 +43,25 @@ def _select_torch_device():
 
 
 def load_ml_classifier(model_path=ML_CLASSIFIER_PATH):
-    """Load the trained ML classifier tuple (vectorizer, model)."""
+    """Load classifier pickle: (vectorizer, model) or (vectorizer, model, LabelEncoder)."""
     if not os.path.exists(model_path):
         print(f"⚠️ ML classifier not found at {model_path}. Continuing without ML labels.")
-        return None, None
+        return None, None, None
     try:
         with open(model_path, "rb") as f:
-            vectorizer, model = pickle.load(f)
+            payload = pickle.load(f)
+        if isinstance(payload, tuple) and len(payload) == 3:
+            vectorizer, model, label_encoder = payload[0], payload[1], payload[2]
+        elif isinstance(payload, tuple) and len(payload) == 2:
+            vectorizer, model, label_encoder = payload[0], payload[1], None
+        else:
+            raise ValueError("classifier pickle must be 2- or 3-tuple")
         print(f"✅ ML risk classifier loaded from {model_path}")
-        return vectorizer, model
+        return vectorizer, model, label_encoder
     except Exception as e:
         print(f"⚠️ Failed to load ML classifier: {e}")
         print("   Continuing without ML risk labels.")
-        return None, None
+        return None, None, None
 
 
 # --- Global NLP Model Initialization ---
@@ -220,7 +227,7 @@ def extract_locations_batch(texts):
         return [[] for _ in texts]
 
 
-def predict_ml_risk_batch(headlines, texts, vectorizer, model):
+def predict_ml_risk_batch(headlines, texts, vectorizer, model, label_encoder=None):
     """Predict ML risk labels/probabilities for headline+text inputs."""
     if not texts:
         return []
@@ -234,13 +241,20 @@ def predict_ml_risk_batch(headlines, texts, vectorizer, model):
             for _ in texts
         ]
     try:
+        import numpy as np
+
         model_inputs = [f"{h} {t[:300]}" for h, t in zip(headlines, texts)]
         X = vectorizer.transform(model_inputs)
-        preds = model.predict(X)
+        raw_preds = model.predict(X)
         probs = model.predict_proba(X)
-        classes = list(model.classes_)
+        if label_encoder is not None:
+            classes = [str(c) for c in label_encoder.classes_]
+            pred_labels = label_encoder.inverse_transform(np.asarray(raw_preds, dtype=int))
+        else:
+            classes = [str(c) for c in model.classes_]
+            pred_labels = [str(p) for p in raw_preds]
         outputs = []
-        for pred, prob in zip(preds, probs):
+        for pred, prob in zip(pred_labels, probs):
             prob_map = {c: round(float(p), 4) for c, p in zip(classes, prob)}
             outputs.append({
                 "ml_risk_label": str(pred),
@@ -266,7 +280,7 @@ def process_all_data(save_to_disk=False):
     load_start = time.perf_counter()
     raw_entries = load_raw_data(directory="data/raw/web_scrape")
     load_elapsed = time.perf_counter() - load_start
-    ml_vectorizer, ml_model = load_ml_classifier()
+    ml_vectorizer, ml_model, ml_label_encoder = load_ml_classifier()
     all_processed_events = []
     docs_processed = 0
     english_docs = 0
@@ -275,9 +289,21 @@ def process_all_data(save_to_disk=False):
     ml_elapsed_total = 0.0
 
     processing_start = time.perf_counter()
+    total_docs = len(raw_entries)
+    last_progress_ts = time.perf_counter()
     for i, raw_entry in enumerate(raw_entries):
-        if i % 100 == 0:
-            print(f"🔄 Processing document {i+1}/{len(raw_entries)}...")
+        if i == 0 or (i + 1) % max(PROGRESS_EVERY_DOCS, 1) == 0:
+            now = time.perf_counter()
+            processed_so_far = i + 1
+            elapsed = now - processing_start
+            docs_per_sec = (processed_so_far / elapsed) if elapsed > 0 else 0.0
+            pct = (processed_so_far / total_docs * 100.0) if total_docs else 100.0
+            print(
+                f"🔄 Preprocessing progress: {processed_so_far}/{total_docs} docs ({pct:.1f}%) "
+                f"| events={len(all_processed_events)} | candidates={candidate_paragraphs} | {docs_per_sec:.2f} docs/s",
+                flush=True,
+            )
+            last_progress_ts = now
         docs_processed += 1
 
         article_metadata = parse_entry_metadata(raw_entry)
@@ -302,6 +328,15 @@ def process_all_data(save_to_disk=False):
             if potential_events:
                 paragraph_candidates.append((j, para_text, potential_events))
         candidate_paragraphs += len(paragraph_candidates)
+        # Heartbeat for long NER-heavy stretches even when doc-based thresholds are not reached.
+        now = time.perf_counter()
+        if now - last_progress_ts >= 10:
+            print(
+                f"⏳ Working... docs={i+1}/{total_docs}, candidates={candidate_paragraphs}, "
+                f"events={len(all_processed_events)}",
+                flush=True,
+            )
+            last_progress_ts = now
 
         batched_texts = [item[1] for item in paragraph_candidates]
         batched_headlines = [article_metadata['title']] * len(paragraph_candidates)
@@ -310,7 +345,7 @@ def process_all_data(save_to_disk=False):
         ner_elapsed_total += time.perf_counter() - ner_start
         ml_start = time.perf_counter()
         ml_predictions = predict_ml_risk_batch(
-            batched_headlines, batched_texts, ml_vectorizer, ml_model
+            batched_headlines, batched_texts, ml_vectorizer, ml_model, ml_label_encoder
         )
         ml_elapsed_total += time.perf_counter() - ml_start
 

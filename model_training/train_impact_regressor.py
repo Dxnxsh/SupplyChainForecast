@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import ElasticNet
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import OneHotEncoder
+from xgboost import XGBRegressor
 
 
 def parse_args():
@@ -105,7 +105,7 @@ def evaluate_split(name, model, df, artifacts):
         return None
     X = transform_features(df, artifacts)
     y = df["impact_score"].values
-    y_pred = np.maximum(0.0, model.predict(X))
+    y_pred = np.maximum(0.0, np.asarray(model.predict(X)).ravel())
     mae = mean_absolute_error(y, y_pred)
     rmse = np.sqrt(mean_squared_error(y, y_pred))
     sp = spearman_like(y, y_pred)
@@ -157,7 +157,15 @@ def main():
     X_train, artifacts = fit_features(train_df, args.max_text_features)
     y_train = train_df["impact_score"].values
 
-    model = ElasticNet(alpha=0.001, l1_ratio=0.2, max_iter=5000, random_state=42)
+    model = XGBRegressor(
+        n_estimators=200,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=42,
+        n_jobs=-1,
+    )
     model.fit(X_train, y_train)
 
     print(f"Train rows: {len(train_df)} | Val rows: {len(val_df)} | Test rows: {len(test_df)}")

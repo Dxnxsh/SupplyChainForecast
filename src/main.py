@@ -16,12 +16,11 @@ import os
 import logging
 import json
 
+from src.db_config import DB_CONNECTION_STRING
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# --- Configuration: Database Connection ---
-DB_CONNECTION_STRING = os.getenv("DB_CONNECTION_STRING", "postgresql://postgres:your_password@localhost:5432/supply_chain_db")
 
 # --- SQLAlchemy Setup ---
 engine = None
@@ -79,6 +78,8 @@ class Event(BaseModel):
     ml_risk_label: Optional[str] = None
     ml_risk_confidence: Optional[float] = None
     ml_risk_probabilities: Optional[dict] = None
+    sentiment_label: Optional[str] = None
+    sentiment_score: Optional[float] = None
     class Config:
         from_attributes = True
 

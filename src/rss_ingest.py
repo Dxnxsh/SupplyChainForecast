@@ -3,8 +3,8 @@ Fetch live news from RSS feeds, score with ML classifier, upsert into PostgreSQL
 
 Configuration:
   - RSS_FEEDS_PATH: JSON file listing feeds (default: config/rss_feeds.json)
-  - ML_CLASSIFIER_PATH: pickle with (vectorizer, model) (default: model_training/classifier.pkl)
-  - DB_CONNECTION_STRING: same as load_to_db
+  - ML_CLASSIFIER_PATH: pickle with (vectorizer, model[, LabelEncoder]) (default: model_training/classifier.pkl)
+  - DB_CONNECTION_STRING: active Postgres (src/db_config.py)
 
 Run once:
   python -m src.rss_ingest
@@ -66,8 +66,12 @@ def load_classifier(model_path: str):
     if not path.is_file():
         raise FileNotFoundError(f"Classifier not found: {path}")
     with path.open("rb") as f:
-        vectorizer, model = pickle.load(f)
-    return vectorizer, model
+        payload = pickle.load(f)
+    if isinstance(payload, tuple) and len(payload) == 3:
+        return payload[0], payload[1], payload[2]
+    if isinstance(payload, tuple) and len(payload) == 2:
+        return payload[0], payload[1], None
+    raise ValueError(f"Expected 2- or 3-tuple in classifier pickle: {path}")
 
 
 def load_impact_regressor(model_path: str | None):
@@ -169,6 +173,64 @@ def attach_predicted_impact_scores(events: list[dict], impact_payload: dict) -> 
             print(f"⚠️ Impact prediction skipped for event: {exc}")
 
 
+def attach_finbert_sentiment(events: list[dict]) -> None:
+    """Populate sentiment_label / sentiment_score (FinBERT default; USE_FINBERT_RISK=0 skips)."""
+    from src.sentiment_finbert import batch_analyze_finbert, finbert_enabled
+
+    if not finbert_enabled() or not events:
+        return
+    texts = [
+        ((e.get("article_title") or "") + " " + (e.get("event_text_segment") or ""))[:4000]
+        for e in events
+    ]
+    try:
+        outs = batch_analyze_finbert(texts)
+        for e, o in zip(events, outs):
+            e["sentiment_label"] = o["sentiment_label"]
+            e["sentiment_score"] = o["sentiment_score"]
+    except Exception as exc:
+        print(f"⚠️ FinBERT sentiment skipped: {exc}")
+
+
+def apply_batch_disruption_and_impact(events: list[dict]) -> None:
+    """
+    Run the same XGBoost disruption + impact heads as RSS on batch-pipeline events
+    (call after match_node, optionally after temporal). Loads paths from env or defaults.
+    Skips quietly if pickles are missing. Does not re-run FinBERT (risk_scoring sets sentiment).
+    """
+    if not events:
+        return
+    disruption_path = os.getenv(
+        "DISRUPTION_CLASSIFIER_PATH",
+        str(PROJECT_ROOT / "model_training" / "disruption_classifier.pkl"),
+    )
+    impact_path = os.getenv(
+        "IMPACT_REGRESSOR_PATH",
+        str(PROJECT_ROOT / "model_training" / "impact_regressor_v2.pkl"),
+    )
+    disruption_payload = load_disruption_classifier(disruption_path)
+    impact_payload = load_impact_regressor(impact_path)
+    if not disruption_payload and not impact_payload:
+        print(
+            "ℹ️ Skipping disruption/impact: no valid pickles "
+            f"(disruption={disruption_path!s}, impact={impact_path!s})."
+        )
+        return
+    try:
+        from src.load_to_db import SUPPLIER_NODES
+    except Exception:
+        SUPPLIER_NODES = {}
+    for ev in events:
+        node = ev.get("matched_node")
+        ev["node_criticality"] = (
+            SUPPLIER_NODES.get(node, {}).get("criticality", 1) if node else 1
+        )
+    if disruption_payload:
+        attach_disruption_probabilities(events, disruption_payload)
+    if impact_payload:
+        attach_predicted_impact_scores(events, impact_payload)
+
+
 def attach_disruption_probabilities(events: list[dict], classifier_payload: dict) -> None:
     if not events:
         return
@@ -219,6 +281,7 @@ def build_scored_event_dict(
     event_text_segment: str,
     vectorizer,
     model,
+    label_encoder=None,
 ) -> dict | None:
     """
     Legacy tri-class risk + ml_risk_* fields from classifier.pkl (same as RSS items).
@@ -236,9 +299,14 @@ def build_scored_event_dict(
         return None
 
     X = vectorizer.transform([model_input])
-    pred = str(model.predict(X)[0])
+    raw_pred = model.predict(X)[0]
+    if label_encoder is not None:
+        pred = str(label_encoder.inverse_transform(np.asarray([raw_pred], dtype=int))[0])
+        classes = [str(c) for c in label_encoder.classes_]
+    else:
+        pred = str(raw_pred)
+        classes = [str(c) for c in model.classes_]
     prob_row = model.predict_proba(X)[0]
-    classes = list(model.classes_)
     prob_map = {c: round(float(p), 4) for c, p in zip(classes, prob_row)}
     confidence = max(prob_map.values()) if prob_map else None
 
@@ -267,7 +335,7 @@ def build_scored_event_dict(
     }
 
 
-def feed_entry_to_event_dict(entry, source_name: str, vectorizer, model) -> dict | None:
+def feed_entry_to_event_dict(entry, source_name: str, vectorizer, model, label_encoder=None) -> dict | None:
     link = (getattr(entry, "link", None) or getattr(entry, "id", None) or "").strip()
     title = _strip_html(getattr(entry, "title", "") or "")
     summary_raw = (
@@ -285,6 +353,7 @@ def feed_entry_to_event_dict(entry, source_name: str, vectorizer, model) -> dict
         summary if summary else title,
         vectorizer,
         model,
+        label_encoder,
     )
 
 
@@ -364,7 +433,7 @@ def enrich_events_for_db(
     else:
         log("[enrich] 4/5 temporal skipped (--skip-temporal)")
 
-    if impact_payload:
+    if impact_payload or disruption_payload:
         try:
             from src.load_to_db import SUPPLIER_NODES
 
@@ -376,18 +445,19 @@ def enrich_events_for_db(
         except Exception:
             for ev in batch:
                 ev["node_criticality"] = 1
-        log("[enrich] 5/5 disruption + impact models")
-        if disruption_payload:
-            attach_disruption_probabilities(batch, disruption_payload)
+
+    log("[enrich] 5/5 FinBERT (optional) + disruption + impact models")
+    attach_finbert_sentiment(batch)
+    if disruption_payload:
+        attach_disruption_probabilities(batch, disruption_payload)
+    if impact_payload:
         attach_predicted_impact_scores(batch, impact_payload)
-    else:
-        log("[enrich] 5/5 skipped (no impact model payload)")
 
     log("[enrich] done")
     return batch
 
 
-def fetch_and_build_events(feeds: list[dict], vectorizer, model) -> list[dict]:
+def fetch_and_build_events(feeds: list[dict], vectorizer, model, label_encoder=None) -> list[dict]:
     import feedparser
 
     events: list[dict] = []
@@ -401,7 +471,7 @@ def fetch_and_build_events(feeds: list[dict], vectorizer, model) -> list[dict]:
             print(f"⚠️ Feed parse issue for {url}: {getattr(parsed, 'bozo_exception', 'unknown')}")
             continue
         for entry in parsed.entries or []:
-            ev = feed_entry_to_event_dict(entry, source, vectorizer, model)
+            ev = feed_entry_to_event_dict(entry, source, vectorizer, model, label_encoder)
             if ev:
                 events.append(ev)
     return events
@@ -420,14 +490,14 @@ def run_once(
             update_status(is_running=True, current_step="Fetching RSS Feeds...", progress_percent=5, items_processed=0, total_items=0, error=None)
             
         feeds = load_feeds_config(feeds_path)
-        vectorizer, model = load_classifier(model_path)
+        vectorizer, model, label_encoder = load_classifier(model_path)
         disruption_payload = load_disruption_classifier(disruption_model_path)
         if disruption_model_path and not disruption_payload:
             print(f"⚠️ Disruption classifier not found at {disruption_model_path}; continuing without it.")
         impact_payload = load_impact_regressor(impact_model_path)
         if impact_model_path and not impact_payload:
             print(f"⚠️ Impact regressor not found at {impact_model_path}; continuing without it.")
-        batch = fetch_and_build_events(feeds, vectorizer, model)
+        batch = fetch_and_build_events(feeds, vectorizer, model, label_encoder)
         print(f"Fetched {len(batch)} item(s) from RSS.")
 
         engine = None

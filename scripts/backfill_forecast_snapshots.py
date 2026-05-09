@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 # Project root on path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from src.db_config import DB_CONNECTION_STRING  # noqa: E402
 from src.forecast_snapshots import (  # noqa: E402
     SOURCE_SCHEDULED,
     ensure_forecast_snapshots_table,
@@ -35,11 +36,7 @@ def main() -> None:
     if d1 < d0:
         raise SystemExit("--to must be >= --from")
 
-    conn = os.getenv(
-        "DB_CONNECTION_STRING",
-        "postgresql://postgres:your_password@localhost:5432/supply_chain_db",
-    )
-    engine = create_engine(conn)
+    engine = create_engine(DB_CONNECTION_STRING)
     ensure_forecast_snapshots_table(engine)
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 

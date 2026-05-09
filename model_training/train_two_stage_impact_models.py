@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import argparse
 import pickle
+import sys
 from pathlib import Path
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy import sparse
 from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import ElasticNet, LogisticRegression
 from sklearn.metrics import (
     classification_report,
     mean_absolute_error,
@@ -15,34 +18,51 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
+from xgboost import XGBClassifier, XGBRegressor
 
+_TRAIN_DIR = Path(__file__).resolve().parent
+if str(_TRAIN_DIR) not in sys.path:
+    sys.path.insert(0, str(_TRAIN_DIR))
+from rule_based_disruption_labels import apply_rule_labels_df
 
 DEFAULT_INPUT_CSVS = [
     "model_training/impact_label_pack_balanced.csv",
     "model_training/impact_label_pack_positive_boost.csv",
 ]
 
+DEFAULT_RULES_INPUT_CSVS = [
+    "model_training/training_impact_dataset.csv",
+]
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Train two-stage impact models from manually labeled CSV."
+        description="Train two-stage impact models: manual labels (default) or rule-based weak labels."
+    )
+    parser.add_argument(
+        "--label-mode",
+        choices=["manual", "rules"],
+        default="manual",
+        help="manual: CSV manual_is_disruption / manual_impact_score. "
+        "rules: keyword buckets (rule_based_disruption_labels.py). "
+        "rules defaults to *_rules.pkl outputs.",
     )
     parser.add_argument(
         "--input-csv",
         action="append",
         dest="input_csvs",
         default=None,
-        help="Labeled CSV (repeat for multiple files). Default: balanced + positive_boost packs.",
+        help="CSV path(s).",
     )
     parser.add_argument(
         "--classifier-out",
-        default="model_training/disruption_classifier.pkl",
-        help="Output path for disruption classifier artifact",
+        default=None,
+        help="Disruption classifier pickle path",
     )
     parser.add_argument(
         "--regressor-out",
-        default="model_training/impact_regressor_v2.pkl",
-        help="Output path for impact regressor artifact",
+        default=None,
+        help="Impact regressor pickle path",
     )
     parser.add_argument(
         "--test-size",
@@ -88,6 +108,30 @@ def load_labeled_frames(paths: list[Path]) -> pd.DataFrame:
     return merged
 
 
+def load_rules_training_frames(paths: list[Path]) -> pd.DataFrame:
+    frames = []
+    for p in paths:
+        if not p.exists():
+            raise FileNotFoundError(f"Input CSV not found: {p}")
+        df = pd.read_csv(p)
+        for col in ("article_title", "event_text_segment"):
+            if col not in df.columns:
+                raise ValueError(f"rules mode requires column {col!r} in {p}")
+        for col in ("article_source", "matched_node"):
+            if col not in df.columns:
+                df[col] = ""
+        frames.append(df)
+    merged = pd.concat(frames, ignore_index=True)
+    if "event_id" in merged.columns:
+        merged = merged.drop_duplicates(subset=["event_id"], keep="last")
+    elif "article_url" in merged.columns:
+        merged = merged.drop_duplicates(
+            subset=["article_url", "article_title", "article_timestamp"],
+            keep="last",
+        )
+    return apply_rule_labels_df(merged)
+
+
 def require_columns(df, cols):
     missing = sorted(set(cols) - set(df.columns))
     if missing:
@@ -106,6 +150,22 @@ def prepare_df(df):
     df["manual_is_disruption"] = df["manual_is_disruption"].astype(int).clip(0, 1)
     df["manual_impact_score"] = df["manual_impact_score"].clip(lower=0, upper=300)
     return df
+
+
+def resolve_output_paths(
+    label_mode: str, classifier_out: Optional[str], regressor_out: Optional[str]
+) -> Tuple[Path, Path]:
+    root = Path(__file__).resolve().parent.parent
+    if label_mode == "rules":
+        c_default = root / "model_training" / "disruption_classifier_rules.pkl"
+        r_default = root / "model_training" / "impact_regressor_v2_rules.pkl"
+    else:
+        c_default = root / "model_training" / "disruption_classifier.pkl"
+        r_default = root / "model_training" / "impact_regressor_v2.pkl"
+    return (
+        Path(classifier_out) if classifier_out else c_default,
+        Path(regressor_out) if regressor_out else r_default,
+    )
 
 
 def text_input(df):
@@ -137,12 +197,29 @@ def transform_shared_features(df, artifacts):
 
 def main():
     args = parse_args()
-    csv_paths = (
-        [Path(p) for p in args.input_csvs]
-        if args.input_csvs
-        else [Path(p) for p in DEFAULT_INPUT_CSVS]
-    )
-    df = load_labeled_frames(csv_paths)
+    project_root = Path(__file__).resolve().parent.parent
+
+    if args.input_csvs:
+        csv_paths = [
+            project_root / p if not Path(p).is_absolute() else Path(p) for p in args.input_csvs
+        ]
+    elif args.label_mode == "rules":
+        csv_paths = [project_root / p for p in DEFAULT_RULES_INPUT_CSVS]
+        if not csv_paths[0].exists():
+            raise FileNotFoundError(
+                "rules mode: pass --input-csv or add "
+                f"{DEFAULT_RULES_INPUT_CSVS[0]}"
+            )
+    else:
+        csv_paths = [project_root / p for p in DEFAULT_INPUT_CSVS]
+
+    if args.label_mode == "rules":
+        df = load_rules_training_frames(csv_paths)
+        print("Rule-based disruption_category distribution:")
+        print(df["rule_disruption_category"].value_counts().to_string())
+    else:
+        df = load_labeled_frames(csv_paths)
+
     df = prepare_df(df)
     if len(df) < 40:
         raise ValueError("Not enough labeled rows for reliable training.")
@@ -152,9 +229,7 @@ def main():
     print(f"Training rows: {len(df)} (disruption=1: {pos_count}, disruption=0: {neg_count})")
 
     stratify_labels = (
-        df["manual_is_disruption"]
-        if pos_count >= 2 and neg_count >= 2
-        else None
+        df["manual_is_disruption"] if pos_count >= 2 and neg_count >= 2 else None
     )
     train_df, test_df = train_test_split(
         df,
@@ -169,12 +244,26 @@ def main():
     y_train_cls = train_df["manual_is_disruption"].values
     y_test_cls = test_df["manual_is_disruption"].values
 
-    cls = LogisticRegression(max_iter=2000, class_weight="balanced")
+    pos = max(1, int((y_train_cls == 1).sum()))
+    neg = max(1, int((y_train_cls == 0).sum()))
+    scale_pos_weight = float(neg) / float(pos)
+
+    cls = XGBClassifier(
+        n_estimators=200,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        scale_pos_weight=scale_pos_weight,
+        random_state=args.random_state,
+        n_jobs=-1,
+        eval_metric="logloss",
+    )
     cls.fit(X_train, y_train_cls)
     cls_pred = cls.predict(X_test)
     cls_prob = cls.predict_proba(X_test)[:, 1]
 
-    print("=== Disruption Classifier ===")
+    print("=== Disruption Classifier (XGBoost) ===")
     print(classification_report(y_test_cls, cls_pred, digits=4))
     try:
         auc = roc_auc_score(y_test_cls, cls_prob)
@@ -185,50 +274,62 @@ def main():
     y_train_reg = train_df["manual_impact_score"].values
     y_test_reg = test_df["manual_impact_score"].values
 
-    # Include classifier probability as a model feature for stage-2 regression.
     train_prob = cls.predict_proba(X_train)[:, 1]
     test_prob = cls_prob
     X_train_reg = sparse.hstack([X_train, sparse.csr_matrix(train_prob[:, None])], format="csr")
     X_test_reg = sparse.hstack([X_test, sparse.csr_matrix(test_prob[:, None])], format="csr")
 
-    reg = ElasticNet(alpha=0.001, l1_ratio=0.2, max_iter=5000, random_state=args.random_state)
+    reg = XGBRegressor(
+        n_estimators=200,
+        max_depth=6,
+        learning_rate=0.1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        random_state=args.random_state,
+        n_jobs=-1,
+    )
     reg.fit(X_train_reg, y_train_reg)
     reg_pred = np.maximum(0.0, reg.predict(X_test_reg))
 
     mae = mean_absolute_error(y_test_reg, reg_pred)
     rmse = np.sqrt(mean_squared_error(y_test_reg, reg_pred))
-    print("\n=== Impact Regressor ===")
+    print("\n=== Impact Regressor (XGBoost) ===")
     print(f"MAE: {mae:.4f}")
     print(f"RMSE: {rmse:.4f}")
 
-    cls_out = Path(args.classifier_out)
-    reg_out = Path(args.regressor_out)
+    cls_out, reg_out = resolve_output_paths(
+        args.label_mode, args.classifier_out, args.regressor_out
+    )
     cls_out.parent.mkdir(parents=True, exist_ok=True)
     reg_out.parent.mkdir(parents=True, exist_ok=True)
 
+    cls_payload = {
+        "model": cls,
+        "artifacts": shared_artifacts,
+        "target": "manual_is_disruption",
+        "label_mode": args.label_mode,
+    }
+    reg_payload = {
+        "model": reg,
+        "artifacts": shared_artifacts,
+        "uses_disruption_probability_feature": True,
+        "target": "manual_impact_score",
+        "label_mode": args.label_mode,
+    }
+
     with cls_out.open("wb") as f:
-        pickle.dump(
-            {
-                "model": cls,
-                "artifacts": shared_artifacts,
-                "target": "manual_is_disruption",
-            },
-            f,
-        )
+        pickle.dump(cls_payload, f)
 
     with reg_out.open("wb") as f:
-        pickle.dump(
-            {
-                "model": reg,
-                "artifacts": shared_artifacts,
-                "uses_disruption_probability_feature": True,
-                "target": "manual_impact_score",
-            },
-            f,
-        )
+        pickle.dump(reg_payload, f)
 
     print(f"\nSaved disruption classifier: {cls_out}")
     print(f"Saved impact regressor v2: {reg_out}")
+    if args.label_mode == "rules":
+        print(
+            "Rollback: use manual mode outputs disruption_classifier.pkl / impact_regressor_v2.pkl "
+            "via DISRUPTION_CLASSIFIER_PATH / IMPACT_REGRESSOR_PATH."
+        )
 
 
 if __name__ == "__main__":

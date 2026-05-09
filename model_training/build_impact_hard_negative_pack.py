@@ -1,13 +1,16 @@
 import argparse
-import os
+import sys
 from pathlib import Path
 
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
 
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-DEFAULT_DB = "postgresql://postgres:your_password@localhost:5432/supply_chain_db"
+from src.db_config import get_read_db_url
 
 LIKELY_NON_DISRUPTION_REGEX = (
     r"(markets wrap|stocks? (rise|rally|fall|drop)|s&p|dow|nasdaq|"
@@ -68,7 +71,7 @@ def add_label_columns(df, bucket_name):
 
 def main():
     args = parse_args()
-    db_url = os.getenv("DB_CONNECTION_STRING", DEFAULT_DB)
+    db_url = get_read_db_url()
     output_path = Path(args.output_csv)
 
     engine = create_engine(db_url)

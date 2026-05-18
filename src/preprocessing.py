@@ -5,6 +5,7 @@ import os
 import pickle
 import re
 import time
+import warnings
 import torch
 from langdetect import detect
 from transformers import pipeline
@@ -16,6 +17,8 @@ from transformers import pipeline
 NER_BATCH_SIZE = int(os.getenv("NER_BATCH_SIZE", "32"))
 ML_CLASSIFIER_PATH = os.getenv("ML_CLASSIFIER_PATH", "model_training/classifier.pkl")
 PROGRESS_EVERY_DOCS = int(os.getenv("PREPROCESS_PROGRESS_EVERY_DOCS", "25"))
+# Incremented when NER raises (e.g. HIP/CUDA kernel mismatch); see end-of-run summary.
+_NER_BATCH_EXCEPTIONS = 0
 
 
 def _select_torch_device():
@@ -23,6 +26,8 @@ def _select_torch_device():
     Select device for Hugging Face NER pipeline.
     Order: env TORCH_DEVICE (cuda|mps|cpu), then CUDA, then Apple Metal (MPS), then CPU.
     On MacBook, MPS is used automatically when available; set TORCH_DEVICE=cpu to force CPU.
+    AMD ROCm builds still use the CUDA-compatible API: torch.cuda.is_available() is True and
+    device 0 is the Radeon GPU; use TORCH_DEVICE=cuda after installing torch+rocm wheels.
     """
     forced = (os.getenv("TORCH_DEVICE") or "").strip().lower()
     if forced == "cpu":
@@ -81,8 +86,21 @@ try:
             f"Hugging Face NER model loaded on Apple Metal (MPS) with batch size {NER_BATCH_SIZE}. "
             "If you see errors, try: export PYTORCH_ENABLE_MPS_FALLBACK=1"
         )
+    elif ner_device_name == "cuda" and torch.cuda.is_available():
+        try:
+            dev = torch.cuda.get_device_name(0)
+        except Exception:
+            dev = "cuda:0"
+        print(
+            f"Hugging Face NER model loaded on CUDA/HIP ({dev}) with batch size {NER_BATCH_SIZE}."
+        )
     else:
         print(f"Hugging Face NER model loaded on {ner_device_name.upper()} with batch size {NER_BATCH_SIZE}.")
+        print(
+            "   ℹ️  Throughput here is driven by this NER model, not FinBERT (that runs later in risk scoring). "
+            "CPU NER is often several times slower than GPU; check TORCH_DEVICE / PyTorch ROCm if you expect GPU.",
+            flush=True,
+        )
 except Exception as e:
     print(f"❌ Error loading Hugging Face NER model: {e}")
     print("Check internet connection and ensure `transformers` and `torch` are installed.")
@@ -223,7 +241,19 @@ def extract_locations_batch(texts):
             locations = [entity['word'] for entity in entities if entity.get('entity_group') == 'LOC']
             all_locations.append(list(set(locations)))
         return all_locations
-    except Exception:
+    except Exception as e:
+        global _NER_BATCH_EXCEPTIONS
+        _NER_BATCH_EXCEPTIONS += 1
+        if not getattr(extract_locations_batch, "_warned", False):
+            extract_locations_batch._warned = True
+            warnings.warn(
+                f"NER location extraction failed for a batch ({e!s}). "
+                "Returning empty locations for those paragraphs (common if GPU/HIP errors); "
+                "geocoding can still run the pipeline using text-only node matching. "
+                "Set TORCH_DEVICE=cpu if you need stable NER on AMD ROCm.",
+                UserWarning,
+                stacklevel=2,
+            )
         return [[] for _ in texts]
 
 
@@ -276,6 +306,9 @@ def predict_ml_risk_batch(headlines, texts, vectorizer, model, label_encoder=Non
 
 def process_all_data(save_to_disk=False):
     """Main function to run the full preprocessing pipeline."""
+    global _NER_BATCH_EXCEPTIONS
+    _NER_BATCH_EXCEPTIONS = 0
+    extract_locations_batch._warned = False
     total_start = time.perf_counter()
     load_start = time.perf_counter()
     raw_entries = load_raw_data(directory="data/raw/web_scrape")
@@ -390,6 +423,20 @@ def process_all_data(save_to_disk=False):
         print(f"\n✅ Preprocessing complete. Processed {len(all_processed_events)} granular event entries.")
     
     total_elapsed = time.perf_counter() - total_start
+    with_loc = sum(1 for e in all_processed_events if e.get("extracted_locations"))
+    if _NER_BATCH_EXCEPTIONS and all_processed_events:
+        print(
+            f"\n⚠️ NER failed for {_NER_BATCH_EXCEPTIONS} batch(es): all `extracted_locations` will be empty. "
+            "Typical cause: PyTorch on AMD GPU (HIP invalid device function). "
+            "Re-run preprocessing with: export TORCH_DEVICE=cpu",
+            flush=True,
+        )
+    elif not with_loc and all_processed_events:
+        print(
+            "\n⚠️ No events have extracted_locations (NER returned no LOC entities). "
+            "If you expected place names, confirm NER is not erroring and texts are not stripped of geography.",
+            flush=True,
+        )
     print("\n⏱️ Timing Summary")
     print(f"   Data load: {load_elapsed:.2f}s")
     print(f"   Processing (incl. language + keyword + NER): {processing_elapsed:.2f}s")

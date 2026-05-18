@@ -3,14 +3,40 @@
 from __future__ import annotations
 
 import os
+import warnings
 from typing import Any
 
 _pipeline: Any = None
+# Set when CUDA/HIP inference fails (e.g. ROCm wheel missing kernels for RDNA2 — "invalid device function").
+_FINBERT_CPU_LOCKED = False
+
+
+def _is_gpu_exec_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    if "hip error" in msg or "invalid device function" in msg:
+        return True
+    if "cuda error" in msg and "invalid" in msg:
+        return True
+    name = type(exc).__name__.lower()
+    return "accelerator" in name
+
+
+def _force_finbert_cpu(reason: str) -> None:
+    global _pipeline, _FINBERT_CPU_LOCKED
+    _pipeline = None
+    _FINBERT_CPU_LOCKED = True
+    warnings.warn(
+        f"FinBERT: GPU inference failed ({reason}); using CPU for this process. "
+        "For AMD RX 6000 series this often means the PyTorch ROCm build lacks your GPU arch; "
+        "try FINBERT_DEVICE=cpu, a different ROCm/PyTorch combo, or HSA_OVERRIDE_GFX_VERSION per distro docs.",
+        UserWarning,
+        stacklevel=3,
+    )
 
 
 def _pipeline_device():
     forced = (os.getenv("FINBERT_DEVICE") or "").strip().lower()
-    if forced == "cpu":
+    if _FINBERT_CPU_LOCKED or forced == "cpu":
         return -1
     try:
         import torch
@@ -43,6 +69,24 @@ def get_finbert_pipeline():
             truncation=True,
             max_length=512,
         )
+        # Tiny forward to catch HIP "invalid device function" (gfx mismatch) before batch scoring.
+        if isinstance(device, int) and device >= 0:
+            try:
+                _pipeline("ok")
+            except Exception as e:
+                if _is_gpu_exec_error(e):
+                    _force_finbert_cpu(str(e).split("\n")[0][:120])
+                    device = -1
+                    _pipeline = pipeline(
+                        "sentiment-analysis",
+                        model=model_name,
+                        tokenizer=model_name,
+                        device=device,
+                        truncation=True,
+                        max_length=512,
+                    )
+                else:
+                    raise
     return _pipeline
 
 
@@ -62,7 +106,14 @@ def analyze_finbert(text: str) -> dict:
 
     pipe = get_finbert_pipeline()
     # pipeline returns list of dicts for batch; single string -> one dict
-    out = pipe(text[:8000])[0]
+    try:
+        out = pipe(text[:8000])[0]
+    except Exception as e:
+        if not _FINBERT_CPU_LOCKED and _is_gpu_exec_error(e):
+            _force_finbert_cpu(str(e).split("\n")[0][:120])
+            out = get_finbert_pipeline()(text[:8000])[0]
+        else:
+            raise
     raw_label = str(out.get("label", "")).lower()
     conf = float(out.get("score", 0.0))
 
@@ -89,7 +140,14 @@ def batch_analyze_finbert(texts: list[str]) -> list[dict]:
         return []
     pipe = get_finbert_pipeline()
     trimmed = [t[:8000] if t else "" for t in texts]
-    raw = pipe(trimmed)
+    try:
+        raw = pipe(trimmed)
+    except Exception as e:
+        if not _FINBERT_CPU_LOCKED and _is_gpu_exec_error(e):
+            _force_finbert_cpu(str(e).split("\n")[0][:120])
+            raw = get_finbert_pipeline()(trimmed)
+        else:
+            raise
     results = []
     for out in raw:
         raw_label = str(out.get("label", "")).lower()

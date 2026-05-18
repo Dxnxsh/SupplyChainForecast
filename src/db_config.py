@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 _DEFAULT = "postgresql://postgres:your_password@localhost:5432/supply_chain_db"
 
 DB_CONNECTION_STRING = os.getenv("DB_CONNECTION_STRING", _DEFAULT)

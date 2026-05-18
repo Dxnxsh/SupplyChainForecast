@@ -102,12 +102,14 @@ def load_scored_data(filepath="data/processed/scored_events.jsonl"):
 def geocode_events(scored_events):
     """
     Geocodes event locations using Nominatim and adds latitude/longitude to events.
-    Prioritizes 'matched_node' then 'extracted_locations'.
-    **Skips events entirely if no location text can be found.**
+    Uses the first string in ``extracted_locations`` when present (from preprocessing NER).
+
+    Events with no NER location still pass through with ``latitude``/``longitude`` unset so
+    downstream ``match_events_to_nodes`` can use keyword matching on title/text.
     """
     print(f"🌍 Starting geocoding for {len(scored_events)} scored events...")
     geocoded_events = []
-    skipped_count = 0
+    no_ner_location_count = 0
     geocoded_count = 0
     cache_hits = 0
     network_lookups = 0
@@ -123,44 +125,44 @@ def geocode_events(scored_events):
         if extracted_locations and isinstance(extracted_locations, list) and len(extracted_locations) > 0 and extracted_locations[0]:
             location_to_geocode = extracted_locations[0]
 
-        # --- <<< If NO location text found, skip this event entirely >>> ---
         if not location_to_geocode:
-            skipped_count += 1
-            # print(f"  Skipping event (URL: {event.get('article_url')}) due to missing location text.")
-            continue # Go to the next event in the scored_events list
+            no_ner_location_count += 1
+            event['latitude'] = None
+            event['longitude'] = None
+            event['geocoded_location_text'] = None
+            geocoded_events.append(event)
+            if (i + 1) % 500 == 0:
+                print(f"   Processed {i+1}/{len(scored_events)} events...")
+            continue
 
-        # --- If location text exists, proceed with geocoding ---
         latitude, longitude = geocode_location_with_retry(location_to_geocode)
         if geocode_location_with_retry.last_was_cache:
             cache_hits += 1
         else:
             network_lookups += 1
 
-        # Add geocoding results to the event dictionary
         event['latitude'] = latitude
         event['longitude'] = longitude
-        event['geocoded_location_text'] = location_to_geocode if latitude is not None else None # Store what was attempted/successful
+        event['geocoded_location_text'] = location_to_geocode if latitude is not None else None
 
-        # Add the event (with potentially null lat/lon if fallback also failed) to the final list
         geocoded_events.append(event)
 
         if latitude is not None and longitude is not None:
             geocoded_count += 1
-        # else: # No need to print warning here if fallback was intended or no coords found
-            # print(f"⚠️ Could not geocode or find fallback for event (URL: {event.get('article_url')}, Location Text: {location_to_geocode}). Lat/Lon set to None.")
 
-        # Add a small delay only for real Nominatim lookups.
         if not geocode_location_with_retry.last_was_cache:
             time.sleep(1.1) # Slightly more than 1 second to be safe
 
-        if (i + 1) % 50 == 0: # Print progress less frequently
+        if (i + 1) % 50 == 0:
             print(f"   Processed {i+1}/{len(scored_events)} events...")
 
     save_geocode_cache(geocode_location_with_retry.cache)
 
     print(f"\n✅ Geocoding complete.")
-    print(f"   Successfully geocoded (or used fallback for) {geocoded_count} events.")
-    print(f"   Skipped {skipped_count} events due to missing location text.")
+    print(f"   Events with coordinates from Nominatim: {geocoded_count}.")
+    print(
+        f"   Events with no NER location string (passed through; lat/lon null): {no_ner_location_count}."
+    )
     print(f"   Cache hits: {cache_hits}")
     print(f"   Network lookups: {network_lookups}")
     print(f"   Total events in output: {len(geocoded_events)}")

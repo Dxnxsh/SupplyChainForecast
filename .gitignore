@@ -69,3 +69,5 @@ model_training/**/*.csv
 
 # Documentation
 docs/
+!docs/superpowers/specs/
+.gstack/

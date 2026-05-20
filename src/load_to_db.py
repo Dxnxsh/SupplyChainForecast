@@ -2,6 +2,7 @@
 
 import json
 import os
+import argparse
 from sqlalchemy import create_engine, text, Column, Integer, String, Float, DateTime, MetaData, Table
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,13 +13,44 @@ from src.db_config import DB_CONNECTION_STRING, DB_CONNECTION_STRING_LEGACY
 
 # --- Supplier Nodes Data with Criticality ---
 SUPPLIER_NODES = {
-    "TSMC_Hsinchu": {"latitude": 24.8016, "longitude": 120.9716, "country": "Taiwan", "criticality": 5},
-    "Foxconn_Zhengzhou": {"latitude": 34.7466, "longitude": 113.6253, "country": "China", "criticality": 5},
-    "Port_of_Long_Beach": {"latitude": 33.7542, "longitude": -118.2165, "country": "USA", "criticality": 4},
-    "Albemarle_Chile": {"latitude": -23.5869, "longitude": -68.1533, "country": "Chile", "criticality": 3},
-    "CATL_Ningde": {"latitude": 26.6577, "longitude": 119.5262, "country": "China", "criticality": 4},
-    "Tesla_Berlin": {"latitude": 52.4045, "longitude": 13.7845, "country": "Germany", "criticality": 3},
-    # Add more nodes here if needed, along with their criticality
+    # iPhone & AirPods & Shared
+    "TSMC_Hsinchu": {"latitude": 24.8016, "longitude": 120.9716, "country": "Taiwan", "criticality": 5, "products": ["iPhone", "AirPods"]},
+    "Foxconn_Zhengzhou": {"latitude": 34.7466, "longitude": 113.6253, "country": "China", "criticality": 5, "products": ["iPhone"]},
+    "Port_of_Long_Beach": {"latitude": 33.7542, "longitude": -118.2165, "country": "USA", "criticality": 4, "products": ["iPhone"]},
+    # Tesla Shared
+    "Albemarle_Chile": {"latitude": -23.5869, "longitude": -68.1533, "country": "Chile", "criticality": 3, "products": ["Tesla Model Y"]},
+    "CATL_Ningde": {"latitude": 26.6577, "longitude": 119.5262, "country": "China", "criticality": 4, "products": ["Tesla Model Y"]},
+    "Tesla_Berlin": {"latitude": 52.4045, "longitude": 13.7845, "country": "Germany", "criticality": 3, "products": ["Tesla Model Y"]},
+    
+    # iPhone specific new nodes
+    "Pegatron_Shanghai": {"latitude": 31.1448, "longitude": 121.5546, "country": "China", "criticality": 4, "products": ["iPhone"]},
+    "Samsung_Display_Seoul": {"latitude": 37.5665, "longitude": 126.9780, "country": "South Korea", "criticality": 4, "products": ["iPhone"]},
+    "Sony_Kumamoto": {"latitude": 32.8032, "longitude": 130.7079, "country": "Japan", "criticality": 3, "products": ["iPhone"]},
+    "Corning_Kentucky": {"latitude": 37.7554, "longitude": -84.8250, "country": "USA", "criticality": 3, "products": ["iPhone"]},
+    "SK_Hynix_Icheon": {"latitude": 37.2642, "longitude": 127.4725, "country": "South Korea", "criticality": 4, "products": ["iPhone"]},
+    "Micron_Boise": {"latitude": 43.5350, "longitude": -116.1419, "country": "USA", "criticality": 3, "products": ["iPhone"]},
+    "Cirrus_Logic_Austin": {"latitude": 30.2711, "longitude": -97.7437, "country": "USA", "criticality": 3, "products": ["iPhone"]},
+    "NXP_Eindhoven": {"latitude": 51.4116, "longitude": 5.4594, "country": "Netherlands", "criticality": 3, "products": ["iPhone"]},
+    "STMicro_Geneva": {"latitude": 46.2238, "longitude": 6.0463, "country": "Switzerland", "criticality": 3, "products": ["iPhone"]},
+    "Broadcom_San_Jose": {"latitude": 37.4093, "longitude": -121.9333, "country": "USA", "criticality": 4, "products": ["iPhone"]},
+    "Kioxia_Tokyo": {"latitude": 35.6441, "longitude": 139.7437, "country": "Japan", "criticality": 4, "products": ["iPhone"]},
+
+    # AirPods specific new nodes
+    "Luxshare_Bac_Giang": {"latitude": 21.2731, "longitude": 106.1946, "country": "Vietnam", "criticality": 4, "products": ["AirPods"]},
+    "GoerTek_Bac_Ninh": {"latitude": 21.1861, "longitude": 106.0763, "country": "Vietnam", "criticality": 4, "products": ["AirPods"]},
+    "Murata_Kyoto": {"latitude": 34.9294, "longitude": 135.6980, "country": "Japan", "criticality": 3, "products": ["AirPods"]},
+    "Varta_Ellwangen": {"latitude": 48.9602, "longitude": 10.1332, "country": "Germany", "criticality": 3, "products": ["AirPods"]},
+    "Inventec_Taipei": {"latitude": 25.0881, "longitude": 121.5647, "country": "Taiwan", "criticality": 4, "products": ["AirPods"]},
+    "Amkor_Manila": {"latitude": 14.3644, "longitude": 121.0531, "country": "Philippines", "criticality": 3, "products": ["AirPods"]},
+
+    # Tesla specific new nodes
+    "LG_Energy_Nanjing": {"latitude": 32.1462, "longitude": 118.9328, "country": "China", "criticality": 4, "products": ["Tesla Model Y"]},
+    "Panasonic_Nevada": {"latitude": 39.5392, "longitude": -119.4398, "country": "USA", "criticality": 4, "products": ["Tesla Model Y"]},
+    "ZF_Friedrichshafen": {"latitude": 47.6536, "longitude": 9.4735, "country": "Germany", "criticality": 3, "products": ["Tesla Model Y"]},
+    "Bosch_Stuttgart": {"latitude": 48.7833, "longitude": 9.1833, "country": "Germany", "criticality": 4, "products": ["Tesla Model Y"]},
+    "Brembo_Bergamo": {"latitude": 45.6961, "longitude": 9.6672, "country": "Italy", "criticality": 3, "products": ["Tesla Model Y"]},
+    "Valeo_Paris": {"latitude": 48.8785, "longitude": 2.3082, "country": "France", "criticality": 3, "products": ["Tesla Model Y"]},
+    "Ganfeng_Lithium_Xinyu": {"latitude": 27.8188, "longitude": 114.9351, "country": "China", "criticality": 4, "products": ["Tesla Model Y"]},
 }
 
 def get_db_engine():
@@ -94,7 +126,8 @@ def create_tables(engine):
         Column('longitude', Float, nullable=False),
         Column('country', String),
         Column('current_risk_score', Float, default=0.0),
-        Column('criticality', Integer, default=1)
+        Column('criticality', Integer, default=1),
+        Column('products', JSONB)
     )
     
     # Events Table definition
@@ -107,7 +140,7 @@ def create_tables(engine):
         Column('event_text_segment', String),
         Column('potential_event_types', JSONB),
         Column('extracted_locations', JSONB),
-        Column('matched_node', String),
+        Column('matched_node', JSONB),
         Column('risk_score', Float),
         Column('risk_relevance_score', Float),
         Column('risk_severity_score', Float),
@@ -143,6 +176,19 @@ def ensure_events_ml_columns(engine):
         print("✅ ML risk columns verified on events table.")
     except SQLAlchemyError as e:
         print(f"⚠️ Could not ensure ML columns (may be non-Postgres): {e}")
+
+def ensure_suppliers_products_column(engine):
+    """Add products column to suppliers table if missing."""
+    stmts = [
+        "ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS products JSONB;"
+    ]
+    try:
+        with engine.begin() as connection:
+            for stmt in stmts:
+                connection.execute(text(stmt))
+        print("✅ Products column verified on suppliers table.")
+    except SQLAlchemyError as e:
+        print(f"⚠️ Could not ensure products column (may be non-Postgres): {e}")
 
 
 def ensure_events_risk_columns(engine):
@@ -266,7 +312,7 @@ def parse_timestamp_robust(timestamp_str):
     return None # Return None if no format matches
 
 
-def _recompute_supplier_risk_scores(connection):
+def _recompute_supplier_risk_scores(connection, node_name=None):
     """
     Roll up per-node exposure to 0–100 for the suppliers table.
 
@@ -274,12 +320,19 @@ def _recompute_supplier_risk_scores(connection):
     when present; otherwise risk_score. Blend is softer than the old avg + 0.8*max formula,
     which saturated at 100 for most nodes whenever any HIGH-risk headlines appeared.
     """
-    print("Recomputing 'current_risk_score' for suppliers from recent event risk data...")
-    update_risk_stmt = text("""
+    print(f"Recomputing 'current_risk_score' for suppliers {'(node: ' + node_name + ')' if node_name else 'all'} from recent event risk data...")
+    
+    where_clause = ""
+    params = {}
+    if node_name:
+        where_clause = "WHERE s.node_name = :node_name"
+        params["node_name"] = node_name
+
+    update_risk_stmt = text(f"""
         UPDATE suppliers AS s
         SET current_risk_score = COALESCE(
             (
-                SELECT ROUND(LEAST(100.0, 0.62 * AVG(t.strength) + 0.38 * MAX(t.strength))::numeric, 2)
+                SELECT ROUND(LEAST(100.0, COALESCE(0.62 * AVG(t.strength) + 0.38 * MAX(t.strength), 0.0))::numeric, 2)
                 FROM (
                     SELECT LEAST(
                         100.0,
@@ -289,7 +342,7 @@ def _recompute_supplier_risk_scores(connection):
                         )
                     ) AS strength
                     FROM events AS e
-                    WHERE e.matched_node = s.node_name
+                    WHERE e.matched_node @> jsonb_build_array(s.node_name)
                       AND e.article_timestamp >= NOW() - INTERVAL '30 days'
                       AND (
                           (e.risk_score IS NOT NULL AND e.risk_score > 0)
@@ -297,28 +350,11 @@ def _recompute_supplier_risk_scores(connection):
                       )
                 ) AS t
             ),
-            (
-                SELECT ROUND(LEAST(100.0, 0.62 * AVG(t.strength) + 0.38 * MAX(t.strength))::numeric, 2)
-                FROM (
-                    SELECT LEAST(
-                        100.0,
-                        COALESCE(
-                            e.predicted_impact_score::double precision / 3.0,
-                            e.risk_score::double precision
-                        )
-                    ) AS strength
-                    FROM events AS e
-                    WHERE e.matched_node = s.node_name
-                      AND (
-                          (e.risk_score IS NOT NULL AND e.risk_score > 0)
-                          OR e.predicted_impact_score IS NOT NULL
-                      )
-                ) AS t
-            ),
             0.0
-        );
+        )
+        {where_clause};
     """)
-    connection.execute(update_risk_stmt)
+    connection.execute(update_risk_stmt, params)
     print("✅ Supplier risk scores updated from recent events.")
 
 
@@ -388,7 +424,7 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
                     "event_text_segment": event.get('event_text_segment'),
                     "potential_event_types": potential_event_types_json,
                     "extracted_locations": extracted_locations_json,
-                    "matched_node": event.get('matched_node'),
+                    "matched_node": json.dumps(event.get('matched_node')) if isinstance(event.get('matched_node'), list) else json.dumps([event.get('matched_node')]) if event.get('matched_node') else '[]',
                     "risk_score": event.get('risk_score'),
                     "risk_relevance_score": event.get('risk_relevance_score'),
                     "risk_severity_score": event.get('risk_severity_score'),
@@ -416,38 +452,58 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
 
 def populate_database(engine, events_data):
     """Populates the 'suppliers' and 'events' tables with data."""
+    ensure_suppliers_products_column(engine)
     ensure_events_ml_columns(engine)
     ensure_events_risk_columns(engine)
     ensure_events_impact_columns(engine)
     ensure_events_sentiment_columns(engine)
     with engine.connect() as connection:
-        print("Populating 'suppliers' table with criticality...")
+        print("Populating 'suppliers' table with criticality and products...")
         for node_name, details in SUPPLIER_NODES.items():
+            products_json = json.dumps(details.get("products", []))
             stmt = text("""
-                INSERT INTO suppliers (node_name, latitude, longitude, country, criticality)
-                VALUES (:node_name, :latitude, :longitude, :country, :criticality)
+                INSERT INTO suppliers (node_name, latitude, longitude, country, criticality, products)
+                VALUES (:node_name, :latitude, :longitude, :country, :criticality, :products)
                 ON CONFLICT (node_name) DO UPDATE SET
                     latitude = EXCLUDED.latitude,
                     longitude = EXCLUDED.longitude,
                     country = EXCLUDED.country,
-                    criticality = EXCLUDED.criticality;
+                    criticality = EXCLUDED.criticality,
+                    products = EXCLUDED.products;
             """)
-            connection.execute(stmt, {"node_name": node_name, **details})
+            connection.execute(stmt, {
+                "node_name": node_name, 
+                "latitude": details["latitude"],
+                "longitude": details["longitude"],
+                "country": details["country"],
+                "criticality": details["criticality"],
+                "products": products_json
+            })
         connection.commit()
         print(f"✅ 'suppliers' table populated with {len(SUPPLIER_NODES)} nodes.")
 
     upsert_events(engine, events_data, recompute_supplier_scores=True)
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Load geocoded events to DB.")
+    parser.add_argument("--recompute-risk", action="store_true", help="Recompute supplier risk scores from existing events")
+    args = parser.parse_args()
+
     engine = get_db_engine()
     if engine:
-        create_tables(engine)
-        ensure_events_ml_columns(engine)
-        events_to_load = load_geocoded_data()
-        if events_to_load:
-            populate_database(engine, events_to_load)
+        if args.recompute_risk:
+            with engine.connect() as connection:
+                _recompute_supplier_risk_scores(connection)
+                connection.commit()
         else:
-            print("🤷 No geocoded events to load.")
+            create_tables(engine)
+            ensure_suppliers_products_column(engine)
+            ensure_events_ml_columns(engine)
+            events_to_load = load_geocoded_data()
+            if events_to_load:
+                populate_database(engine, events_to_load)
+            else:
+                print("🤷 No geocoded events to load.")
 
 def get_all_events(engine):
     """Fetches all events from the database and returns them as a list of dicts."""

@@ -1,9 +1,9 @@
 import { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Search, Filter, ArrowUpDown } from 'lucide-react';
+import { Filter, ArrowUpDown } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import {
   Table,
@@ -18,7 +18,10 @@ import { api } from '@/lib/api';
 import { mapSupplier } from '@/lib/dataMappers';
 
 export default function SuppliersPage() {
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const searchQuery = searchParams.get('q') || '';
+  
   const [sortField, setSortField] = useState<'name' | 'riskScore' | 'criticality'>('riskScore');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
@@ -59,6 +62,10 @@ export default function SuppliersPage() {
     }
   };
 
+  const handleRowClick = (supplierId: string) => {
+    navigate('/', { state: { selectedSupplierId: supplierId } });
+  };
+
   return (
     <div className="flex-1 flex flex-col h-screen overflow-hidden">
       <Header title="Suppliers" subtitle="Manage and monitor all suppliers" />
@@ -70,23 +77,19 @@ export default function SuppliersPage() {
           </div>
         )}
 
-        {/* Search and Filter Bar */}
+        {/* Filter Bar */}
         <div className="flex items-center gap-4 mb-6">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search suppliers..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 bg-secondary/50"
-            />
-          </div>
           <Button variant="outline" size="sm">
             <Filter className="w-4 h-4 mr-2" />
             Filters
           </Button>
           {suppliersQuery.isLoading && (
             <span className="text-sm text-muted-foreground">Loading suppliers...</span>
+          )}
+          {searchQuery && (
+            <span className="text-sm text-muted-foreground italic">
+              Filtering by: "{searchQuery}"
+            </span>
           )}
         </div>
 
@@ -109,13 +112,13 @@ export default function SuppliersPage() {
                   </div>
                 </TableHead>
                 <TableHead>Location</TableHead>
-                <TableHead>Supply Chains</TableHead>
+                <TableHead>Exposure</TableHead>
                 <TableHead
                   className="cursor-pointer"
                   onClick={() => handleSort('riskScore')}
                 >
                   <div className="flex items-center gap-2">
-                    Exposure
+                    Score
                     <ArrowUpDown className="w-4 h-4" />
                   </div>
                 </TableHead>
@@ -138,7 +141,8 @@ export default function SuppliersPage() {
                   initial={{ opacity: 0, x: -20 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: index * 0.05 }}
-                  className="border-border hover:bg-secondary/30 cursor-pointer"
+                  className="border-border hover:bg-secondary/30 cursor-pointer transition-colors"
+                  onClick={() => handleRowClick(supplier.id)}
                 >
                   <TableCell className="font-medium">{supplier.name}</TableCell>
                   <TableCell className="text-muted-foreground">
@@ -149,6 +153,9 @@ export default function SuppliersPage() {
                       <Progress value={supplier.riskScore} className="w-16 h-1.5" />
                       <span className="text-sm">{supplier.riskScore}%</span>
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    <span className="text-sm font-medium">{supplier.riskLevel}</span>
                   </TableCell>
                   <TableCell>
                     <span className="text-sm font-medium">{supplier.criticality}</span>

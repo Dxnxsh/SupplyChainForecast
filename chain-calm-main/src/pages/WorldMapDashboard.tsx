@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Globe, Building2, AlertTriangle, Shield, Filter } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
 import { Header } from '@/components/layout/Header';
 import { StatsCard } from '@/components/dashboard/StatsCard';
 import { WorldMap } from '@/components/dashboard/WorldMap';
@@ -17,12 +18,20 @@ import {
 import { Supplier } from '@/types/supplier';
 import { api } from '@/lib/api';
 import { mapDisruptionEvent, mapSupplier } from '@/lib/dataMappers';
+import { PRODUCT_EDGES } from '@/lib/productEdges';
 
 export default function WorldMapDashboard() {
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
   const [filterCountry, setFilterCountry] = useState<string>('all');
+  const [filterProduct, setFilterProduct] = useState<string>('all');
   /** YYYY-MM-DD UTC calendar day, or '' for live data */
   const [rewindDate, setRewindDate] = useState<string>('');
+  
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const searchQuery = searchParams.get('q') || '';
+  const selectedId = searchParams.get('s');
 
   const asOf = rewindDate || undefined;
 
@@ -49,12 +58,78 @@ export default function WorldMapDashboard() {
 
   const suppliers = (suppliersQuery.data ?? []).map(mapSupplier);
 
-  const filteredSuppliers =
-    filterCountry === 'all'
-      ? suppliers
-      : suppliers.filter((s) => s.country === filterCountry);
+  // Handle cross-page selection and URL sync
+  useEffect(() => {
+    if (suppliers.length > 0) {
+      if (selectedId) {
+        const supplier = suppliers.find(s => s.id === selectedId);
+        if (supplier) setSelectedSupplier(supplier);
+      } else if (location.state?.selectedSupplierId) {
+        const supplier = suppliers.find(s => s.id === location.state.selectedSupplierId || s.name === location.state.selectedSupplierId);
+        if (supplier) {
+          setSelectedSupplier(supplier);
+          setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('s', supplier.id);
+            return next;
+          });
+          navigate('.', { replace: true, state: {} });
+        }
+      } else {
+        setSelectedSupplier(null);
+      }
+    }
+  }, [selectedId, location.state, suppliers, navigate, setSearchParams]);
+
+  // Compute ColoredEdges with risk coloring and deduplication
+  const coloredEdges = useMemo(() => {
+    const suppliersMap = new Map(suppliers.map(s => [s.id, s]));
+    const allEdges: any[] = [];
+    const activeEdgePairs = new Set<string>();
+
+    if (filterProduct !== 'all' && PRODUCT_EDGES[filterProduct]) {
+      PRODUCT_EDGES[filterProduct].forEach(([fromId, toId]) => {
+        activeEdgePairs.add(`${fromId}-${toId}`);
+      });
+    }
+
+    // Deduplicate union of all product edges
+    const seenEdges = new Set<string>();
+    Object.values(PRODUCT_EDGES).forEach(edges => {
+      edges.forEach(([fromId, toId]) => {
+        const edgeKey = `${fromId}-${toId}`;
+        if (!seenEdges.has(edgeKey)) {
+          seenEdges.add(edgeKey);
+          const fromNode = suppliersMap.get(fromId);
+          const toNode = suppliersMap.get(toId);
+          if (fromNode && toNode) {
+            allEdges.push({
+              from: fromNode.coordinates,
+              to: toNode.coordinates,
+              fromId,
+              toId,
+              sourceRiskLevel: fromNode.riskLevel,
+              isPulsing: fromNode.riskScore >= 69,
+              isActive: activeEdgePairs.has(edgeKey) || filterProduct === 'all'
+            });
+          }
+        }
+      });
+    });
+
+    return allEdges;
+  }, [suppliers, filterProduct]);
+
+  const filteredSuppliers = suppliers.filter((s) => {
+    const matchCountry = filterCountry === 'all' || s.country === filterCountry;
+    const matchProduct = filterProduct === 'all' || (s.products && s.products.includes(filterProduct));
+    return matchCountry && matchProduct;
+  });
 
   const countries = [...new Set(suppliers.map((s) => s.country))].sort();
+  
+  // Extract unique products from all suppliers
+  const products = [...new Set(suppliers.flatMap((s) => s.products || []))].sort();
 
   const summaryAvgRisk = Math.round(summaryQuery.data?.avg_risk_score ?? 0);
   const highRiskSuppliers = suppliers.filter(
@@ -162,6 +237,28 @@ export default function WorldMapDashboard() {
             <Button variant="outline" size="sm" type="button" onClick={() => setFilterCountry('all')}>
               Clear country
             </Button>
+            
+            <div className="flex items-center gap-2 ml-4">
+              <Filter className="w-4 h-4 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Filter by product:</span>
+            </div>
+            <Select value={filterProduct} onValueChange={setFilterProduct}>
+              <SelectTrigger className="w-48 bg-secondary/50">
+                <SelectValue placeholder="Product" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Products</SelectItem>
+                {products.map((product) => (
+                  <SelectItem key={product} value={product}>
+                    {product}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="outline" size="sm" type="button" onClick={() => setFilterProduct('all')}>
+              Clear product
+            </Button>
+
             {suppliersQuery.isLoading && (
               <span className="text-sm text-muted-foreground">Loading suppliers...</span>
             )}
@@ -175,8 +272,19 @@ export default function WorldMapDashboard() {
           >
             <WorldMap
               suppliers={filteredSuppliers}
-              onSupplierClick={setSelectedSupplier}
+              onSupplierClick={(s) => {
+                if (s) {
+                  setSearchParams(prev => {
+                    const next = new URLSearchParams(prev);
+                    next.set('s', s.id);
+                    return next;
+                  });
+                }
+              }}
               selectedSupplier={selectedSupplier}
+              coloredEdges={coloredEdges}
+              isFilterActive={filterProduct !== 'all'}
+              searchQuery={searchQuery}
             />
           </motion.div>
         </div>
@@ -186,7 +294,14 @@ export default function WorldMapDashboard() {
           supplier={selectedSupplier}
           events={supplierDisruptions}
           isLoading={supplierEventsQuery.isLoading}
-          onClose={() => setSelectedSupplier(null)}
+          onClose={() => {
+            setSelectedSupplier(null);
+            setSearchParams(prev => {
+              const next = new URLSearchParams(prev);
+              next.delete('s');
+              return next;
+            });
+          }}
         />
       </div>
     </div>

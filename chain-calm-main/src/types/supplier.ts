@@ -8,6 +8,7 @@ export interface Supplier {
   riskScore: number;
   criticality: number;
   riskLevel: RiskLevel;
+  products?: string[];
 }
 
 export interface DisruptionEvent {
@@ -30,4 +31,14 @@ export interface ResilienceHistory {
   date: string;
   riskScore: number;
   resilienceScore: number;
+}
+
+export interface ColoredEdge {
+  from: [number, number];
+  to: [number, number];
+  fromId: string;
+  toId: string;
+  sourceRiskLevel: RiskLevel;
+  isPulsing: boolean;
+  isActive: boolean;
 }

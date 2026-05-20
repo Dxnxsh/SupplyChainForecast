@@ -53,6 +53,7 @@ class Supplier(BaseModel):
     country: Optional[str] = None
     current_risk_score: Optional[float] = None
     criticality: int = 1 # NEW: Added criticality
+    products: Optional[List[str]] = None # NEW: Added products
     class Config:
         from_attributes = True
 
@@ -206,9 +207,23 @@ def process_events_with_impact(event_rows, criticality_map):
     processed = []
     for row in event_rows:
         event_dict = dict(row._mapping)
-        node_name = event_dict.get('matched_node')
+        matched_node = event_dict.get('matched_node')
         risk_score = event_dict.get('risk_score') or 0.0
-        criticality = criticality_map.get(node_name, 1) # Default criticality to 1 if node not found
+        
+        # matched_node can now be a list (from JSONB array)
+        if isinstance(matched_node, list):
+            if matched_node:
+                # Use the maximum criticality among all matched nodes
+                criticality = max([criticality_map.get(n, 1) for n in matched_node])
+                # For display/serialization, join them or pick the first? 
+                # The Event model likely expects a string.
+                event_dict['matched_node'] = ", ".join(matched_node)
+            else:
+                criticality = 1
+                event_dict['matched_node'] = None
+        else:
+            # Fallback for legacy data or single strings
+            criticality = criticality_map.get(matched_node, 1)
 
         # Calculate impact score: Risk Score * Node Criticality
         event_dict['impact_score'] = round(risk_score * criticality, 2)
@@ -217,6 +232,8 @@ def process_events_with_impact(event_rows, criticality_map):
                 event_dict['predicted_impact_score'] = float(event_dict['predicted_impact_score'])
             except (TypeError, ValueError):
                 event_dict['predicted_impact_score'] = None
+        
+        # Ensure it fits the Pydantic model (which might expect a string for matched_node)
         processed.append(Event.from_orm(event_dict))
     return processed
 
@@ -238,7 +255,7 @@ def _exposure_rollup_stats(db: Session, node_name: str):
     Returns (stats_row_dict, use_30d, top_driver_rows) where use_30d is True iff the stats come from the 30-day window.
     """
     base_where = """
-        matched_node = :n
+        matched_node @> jsonb_build_array(:n)
         AND (
             (risk_score IS NOT NULL AND risk_score > 0)
             OR predicted_impact_score IS NOT NULL
@@ -330,7 +347,7 @@ def _supplier_exposure_as_of(db: Session, node_name: str, as_of: date) -> float:
     Match load_to_db rollup with NOW replaced by as_of: 30d window ending as_of, else all-time through as_of.
     """
     base_filter = """
-        matched_node = :node_name
+        matched_node @> jsonb_build_array(:node_name)
         AND article_timestamp IS NOT NULL
         AND article_timestamp::date <= :as_of
         AND (
@@ -397,7 +414,7 @@ def get_all_suppliers(
     Optional as_of recomputes current_risk_score from events through that UTC date.
     """
     try:
-        query = text("SELECT id, node_name, latitude, longitude, country, current_risk_score, criticality FROM suppliers")
+        query = text("SELECT id, node_name, latitude, longitude, country, current_risk_score, criticality, products FROM suppliers")
         result = db.execute(query).fetchall()
         rows = [dict(row._mapping) for row in result]
         if as_of is not None:
@@ -471,7 +488,7 @@ def get_events_by_node(
             params["as_of"] = as_of
         query = text(f"""
             SELECT * FROM events
-                        WHERE matched_node = :node_name
+                        WHERE matched_node @> :node_name_json
                             AND latitude IS NOT NULL
                             AND longitude IS NOT NULL
                             AND article_timestamp IS NOT NULL
@@ -479,6 +496,7 @@ def get_events_by_node(
                         ORDER BY article_timestamp DESC NULLS LAST
             LIMIT :limit;
         """)
+        params["node_name_json"] = json.dumps([node_name])
         result = db.execute(query, params).fetchall()
         return process_events_with_impact(result, criticality_map)
     except Exception as e:
@@ -560,7 +578,7 @@ def post_supplier_ai_summary(
                        risk_score, ml_risk_label,
                        predicted_impact_score, predicted_disruption_probability
                 FROM events
-                WHERE matched_node = :n
+                WHERE matched_node @> jsonb_build_array(:n)
                   AND (
                     (risk_score IS NOT NULL AND risk_score > 0)
                     OR predicted_impact_score IS NOT NULL
@@ -779,7 +797,7 @@ def get_risk_forecast(node_name: str, db: Session = Depends(get_db)):
         query = text("""
             SELECT article_timestamp::date as ds, SUM(risk_score) as y
             FROM events
-            WHERE matched_node = :node_name AND article_timestamp IS NOT NULL AND risk_score IS NOT NULL
+            WHERE matched_node @> jsonb_build_array(:node_name) AND article_timestamp IS NOT NULL AND risk_score IS NOT NULL
             GROUP BY ds
             ORDER BY ds;
         """)
@@ -1088,7 +1106,7 @@ def get_forecasted_events_by_node(
 
         query = text(f"""
             SELECT * FROM events
-            WHERE matched_node = :node_name
+            WHERE matched_node @> :node_name_json
             AND latitude IS NOT NULL 
             AND longitude IS NOT NULL
             AND temporal_info IS NOT NULL
@@ -1103,6 +1121,7 @@ def get_forecasted_events_by_node(
                 END ASC
             LIMIT :limit;
         """)
+        params["node_name_json"] = json.dumps([node_name])
         result = db.execute(query, params).fetchall()
         
         events = process_events_with_impact(result, criticality_map)

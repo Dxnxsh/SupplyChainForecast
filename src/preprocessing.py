@@ -6,6 +6,7 @@ import pickle
 import re
 import time
 import warnings
+import gc
 import torch
 from langdetect import detect
 from transformers import pipeline
@@ -70,41 +71,63 @@ def load_ml_classifier(model_path=ML_CLASSIFIER_PATH):
 
 
 # --- Global NLP Model Initialization ---
-# This section loads the models into memory once when the script starts.
+# This section defines lazy loading for models.
 
-try:
-    ner_device, ner_device_name = _select_torch_device()
-    print("Loading Hugging Face NER model (dbmdz/bert-large-cased-finetuned-conll03-english)...")
-    ner_pipeline = pipeline(
-        "ner",
-        model="dbmdz/bert-large-cased-finetuned-conll03-english",
-        aggregation_strategy="simple",
-        device=ner_device,
-    )
-    if ner_device_name == "mps":
-        print(
-            f"Hugging Face NER model loaded on Apple Metal (MPS) with batch size {NER_BATCH_SIZE}. "
-            "If you see errors, try: export PYTORCH_ENABLE_MPS_FALLBACK=1"
-        )
-    elif ner_device_name == "cuda" and torch.cuda.is_available():
+_ner_pipeline = None
+
+def get_ner_pipeline():
+    """Lazily load the Hugging Face NER pipeline."""
+    global _ner_pipeline
+    if _ner_pipeline is None:
         try:
-            dev = torch.cuda.get_device_name(0)
+            ner_device, ner_device_name = _select_torch_device()
+            print("Loading Hugging Face NER model (dbmdz/bert-large-cased-finetuned-conll03-english)...")
+            from transformers import pipeline
+            _ner_pipeline = pipeline(
+                "ner",
+                model="dbmdz/bert-large-cased-finetuned-conll03-english",
+                aggregation_strategy="simple",
+                device=ner_device,
+            )
+            if ner_device_name == "mps":
+                print(
+                    f"Hugging Face NER model loaded on Apple Metal (MPS) with batch size {NER_BATCH_SIZE}. "
+                    "If you see errors, try: export PYTORCH_ENABLE_MPS_FALLBACK=1"
+                )
+            elif ner_device_name == "cuda" and torch.cuda.is_available():
+                try:
+                    dev = torch.cuda.get_device_name(0)
+                except Exception:
+                    dev = "cuda:0"
+                print(
+                    f"Hugging Face NER model loaded on CUDA/HIP ({dev}) with batch size {NER_BATCH_SIZE}."
+                )
+            else:
+                print(f"Hugging Face NER model loaded on {ner_device_name.upper()} with batch size {NER_BATCH_SIZE}.")
+                print(
+                    "   ℹ️  Throughput here is driven by this NER model, not FinBERT (that runs later in risk scoring). "
+                    "CPU NER is often several times slower than GPU; check TORCH_DEVICE / PyTorch ROCm if you expect GPU.",
+                    flush=True,
+                )
+        except Exception as e:
+            print(f"❌ Error loading Hugging Face NER model: {e}")
+            print("Check internet connection and ensure `transformers` and `torch` are installed.")
+            # In a real app we might want to raise, but keeping original logic of potentially exiting or failing later
+            raise e
+    return _ner_pipeline
+
+def unload_ner():
+    """Clear the NER pipeline from RAM and trigger garbage collection."""
+    global _ner_pipeline
+    if _ner_pipeline is not None:
+        print("📉 Unloading NER model from RAM...")
+        _ner_pipeline = None
+        gc.collect()
+        try:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         except Exception:
-            dev = "cuda:0"
-        print(
-            f"Hugging Face NER model loaded on CUDA/HIP ({dev}) with batch size {NER_BATCH_SIZE}."
-        )
-    else:
-        print(f"Hugging Face NER model loaded on {ner_device_name.upper()} with batch size {NER_BATCH_SIZE}.")
-        print(
-            "   ℹ️  Throughput here is driven by this NER model, not FinBERT (that runs later in risk scoring). "
-            "CPU NER is often several times slower than GPU; check TORCH_DEVICE / PyTorch ROCm if you expect GPU.",
-            flush=True,
-        )
-except Exception as e:
-    print(f"❌ Error loading Hugging Face NER model: {e}")
-    print("Check internet connection and ensure `transformers` and `torch` are installed.")
-    exit()
+            pass
 
 # --- Event Keyword Definitions ---
 EVENT_KEYWORDS = {
@@ -235,7 +258,8 @@ def extract_locations_batch(texts):
     if not texts:
         return []
     try:
-        predictions = ner_pipeline(texts, batch_size=NER_BATCH_SIZE)
+        pipe = get_ner_pipeline()
+        predictions = pipe(texts, batch_size=NER_BATCH_SIZE)
         all_locations = []
         for entities in predictions:
             locations = [entity['word'] for entity in entities if entity.get('entity_group') == 'LOC']

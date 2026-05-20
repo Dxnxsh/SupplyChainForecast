@@ -1,12 +1,15 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, MapPin, AlertCircle, Calendar, MapPinned, Sparkles, Loader2 } from 'lucide-react';
-import { Supplier, DisruptionEvent } from '@/types/supplier';
+import { X, MapPin, AlertCircle, Calendar, MapPinned, Sparkles, Loader2, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Supplier, DisruptionEvent, BackendHybridForecastPoint } from '@/types/supplier';
 import { RiskBadge } from './RiskBadge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Separator } from '@/components/ui/separator';
 import { api } from '@/lib/api';
+import { useQuery } from '@tanstack/react-query';
+import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
+import { cn } from '@/lib/utils';
 
 interface SupplierDetailPanelProps {
   supplier: Supplier | null;
@@ -25,6 +28,17 @@ export function SupplierDetailPanel({
   const [aiModel, setAiModel] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+
+  const forecastQuery = useQuery({
+    queryKey: ['forecast', 'hybrid', supplier?.id],
+    queryFn: () => api.getSupplierForecast(supplier?.id || ''),
+    enabled: !!supplier?.id,
+  });
+
+  const forecastData = forecastQuery.data || [];
+  const lastRisk = forecastData[forecastData.length - 1]?.yhat;
+  const firstRisk = forecastData[0]?.yhat;
+  const trend = lastRisk > firstRisk ? 'up' : (lastRisk < firstRisk ? 'down' : 'stable');
 
   useEffect(() => {
     setAiSummary(null);
@@ -113,11 +127,50 @@ export function SupplierDetailPanel({
               </div>
             </div>
 
-            <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-2">
+            {forecastData.length > 0 && (
+              <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 shadow-inner">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] text-muted-foreground uppercase tracking-[0.15em] font-bold">Risk Trajectory</span>
+                    <span className="text-xs text-muted-foreground">Next 14 Days</span>
+                  </div>
+                  <div className="flex items-center gap-2 px-2 py-1 rounded-full bg-background/50 border border-border">
+                    {trend === 'up' && <TrendingUp className="w-3 h-3 text-risk-high" />}
+                    {trend === 'down' && <TrendingDown className="w-3 h-3 text-risk-low" />}
+                    {trend === 'stable' && <Minus className="w-3 h-3 text-muted-foreground" />}
+                    <span className={cn(
+                      "text-[10px] font-bold uppercase tracking-wider",
+                      trend === 'up' && "text-risk-high",
+                      trend === 'down' && "text-risk-low",
+                      trend === 'stable' && "text-muted-foreground"
+                    )}>
+                      {trend}
+                    </span>
+                  </div>
+                </div>
+                <div className="h-20 w-full relative group">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={forecastData}>
+                      <YAxis domain={['auto', 'auto']} hide />
+                      <Line 
+                        type="monotone" 
+                        dataKey="yhat" 
+                        stroke={trend === 'up' ? 'hsl(0, 84%, 60%)' : (trend === 'down' ? 'hsl(142, 76%, 46%)' : '#94a3b8')} 
+                        strokeWidth={3} 
+                        dot={false}
+                        className="drop-shadow-[0_0_8px_rgba(255,255,255,0.2)]"
+                      />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            <div className="rounded-lg border border-border bg-secondary/30 p-3 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <span className="text-sm font-medium text-foreground flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-primary" />
-                  AI summary
+                  AI Intelligence Summary
                 </span>
                 <Button
                   type="button"
@@ -130,7 +183,7 @@ export function SupplierDetailPanel({
                   {aiLoading ? (
                     <>
                       <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />
-                      Working…
+                      Synthesizing…
                     </>
                   ) : (
                     <>
@@ -140,20 +193,29 @@ export function SupplierDetailPanel({
                   )}
                 </Button>
               </div>
-              <p className="text-xs text-muted-foreground">
-                Runs only when you click Generate. Uses OpenRouter on the server (
-                <code className="text-[10px]">OPENROUTER_API_KEY</code>).
-              </p>
+              
               {aiError && (
-                <p className="text-xs text-risk-high whitespace-pre-wrap">{aiError}</p>
+                <p className="text-xs text-risk-high bg-risk-high/10 p-2 rounded border border-risk-high/20">
+                  {aiError}
+                </p>
               )}
+              
               {aiSummary && (
-                <div className="text-sm text-foreground whitespace-pre-wrap border-t border-border pt-2 mt-1">
-                  {aiSummary}
+                <div className="text-sm text-foreground leading-relaxed whitespace-pre-wrap border-t border-border pt-3 mt-1 italic opacity-90">
+                  "{aiSummary}"
                 </div>
               )}
+              
               {aiModel && (
-                <p className="text-[10px] text-muted-foreground">Model: {aiModel}</p>
+                <p className="text-[10px] text-muted-foreground pt-1 text-right">
+                  Model: {aiModel}
+                </p>
+              )}
+              
+              {!aiSummary && !aiLoading && !aiError && (
+                <p className="text-xs text-muted-foreground">
+                  Generate an AI-powered summary of recent events and their projected impact on this node.
+                </p>
               )}
             </div>
           </div>

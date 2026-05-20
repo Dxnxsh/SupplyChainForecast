@@ -5,6 +5,7 @@ interface RiskBadgeProps {
   level: RiskLevel;
   showLabel?: boolean;
   size?: 'sm' | 'md' | 'lg';
+  labelPrefix?: string;
 }
 
 const riskConfig = {
@@ -40,7 +41,7 @@ const sizeConfig = {
   lg: 'text-base px-3 py-1.5',
 };
 
-export function RiskBadge({ level, showLabel = true, size = 'md' }: RiskBadgeProps) {
+export function RiskBadge({ level, showLabel = true, size = 'md', labelPrefix }: RiskBadgeProps) {
   const config = riskConfig[level];
 
   return (
@@ -53,7 +54,12 @@ export function RiskBadge({ level, showLabel = true, size = 'md' }: RiskBadgePro
       )}
     >
       <span className={cn('w-2 h-2 rounded-full', config.dotClass)} />
-      {showLabel && config.label}
+      {showLabel && (
+        <span>
+          {labelPrefix ? `${labelPrefix}: ` : ''}
+          {config.label}
+        </span>
+      )}
     </span>
   );
 }

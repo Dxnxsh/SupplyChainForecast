@@ -296,16 +296,18 @@ def create_hybrid_forecast(events, node_name, forecast_days=14, alpha=0.6):
     return df
 
 
+from src.load_to_db import SUPPLIER_NODES
+
 def generate_all_node_forecasts(events, forecast_days=14, output_dir="data/forecasts"):
     """
-    Generates hybrid forecasts for all nodes with sufficient data.
+    Generates hybrid forecasts for all nodes defined in SUPPLIER_NODES.
     Saves individual JSON files for each node.
     """
     os.makedirs(output_dir, exist_ok=True)
     
-    # Get unique nodes
-    nodes = set(e.get('matched_node') for e in events if e.get('matched_node'))
-    logger.info(f"Generating forecasts for {len(nodes)} nodes...")
+    # Get all defined nodes
+    nodes = list(SUPPLIER_NODES.keys())
+    logger.info(f"Generating forecasts for {len(nodes)} defined nodes...")
     
     forecasts = {}
     
@@ -313,7 +315,7 @@ def generate_all_node_forecasts(events, forecast_days=14, output_dir="data/forec
         try:
             forecast_df = create_hybrid_forecast(events, node, forecast_days)
             
-            if forecast_df is not None and not forecast_df.empty:
+            if forecast_df is not None:
                 # Convert to JSON-serializable format
                 forecast_dict = forecast_df.to_dict('records')
                 

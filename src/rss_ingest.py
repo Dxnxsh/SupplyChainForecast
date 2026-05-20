@@ -22,6 +22,7 @@ import pickle
 import re
 import sys
 import time
+import gc
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
@@ -485,6 +486,9 @@ def run_once(
     skip_db: bool,
     is_background: bool = False,
 ) -> int:
+    vectorizer, model, label_encoder = None, None, None
+    disruption_payload = None
+    impact_payload = None
     try:
         if is_background:
             update_status(is_running=True, current_step="Fetching RSS Feeds...", progress_percent=5, items_processed=0, total_items=0, error=None)
@@ -576,6 +580,34 @@ def run_once(
         if is_background:
             update_status(error=str(e), is_running=False, current_step="Error")
         raise e
+    finally:
+        # --- Memory Cleanup ---
+        # 1. Unload Transformer models (FinBERT, NER)
+        try:
+            from src.sentiment_finbert import unload_finbert
+            from src.preprocessing import unload_ner
+            unload_finbert()
+            unload_ner()
+        except ImportError:
+            pass
+
+        # 2. Clear local XGBoost model objects
+        print("📉 Clearing local XGBoost models...")
+        if 'vectorizer' in locals(): del vectorizer
+        if 'model' in locals(): del model
+        if 'label_encoder' in locals(): del label_encoder
+        if 'disruption_payload' in locals(): del disruption_payload
+        if 'impact_payload' in locals(): del impact_payload
+        
+        # 3. Force garbage collection
+        gc.collect()
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
+        print("✅ RSS pipeline memory cleanup complete.")
 
 
 def main():

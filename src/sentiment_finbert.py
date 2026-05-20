@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import warnings
+import gc
 from typing import Any
 
 _pipeline: Any = None
@@ -88,6 +89,25 @@ def get_finbert_pipeline():
                 else:
                     raise
     return _pipeline
+
+
+def unload_finbert():
+    """Clear the FinBERT pipeline from RAM and trigger garbage collection."""
+    global _pipeline
+    if _pipeline is not None:
+        print("📉 Unloading FinBERT model from RAM...")
+        _pipeline = None
+        gc.collect()
+        # If using CUDA, try to clear cache
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                # MPS doesn't have an explicit empty_cache but gc.collect() helps
+                pass
+        except Exception:
+            pass
 
 
 def finbert_enabled() -> bool:

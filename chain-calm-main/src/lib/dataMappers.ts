@@ -47,6 +47,7 @@ export const mapSupplier = (supplier: BackendSupplier): Supplier => {
     riskScore,
     criticality: supplier.criticality,
     riskLevel: supplierExposureLevel(riskScore),
+    products: supplier.products ?? [],
   };
 };
 

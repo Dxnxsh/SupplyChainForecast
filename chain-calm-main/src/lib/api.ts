@@ -8,6 +8,7 @@ export interface BackendSupplier {
   country?: string | null;
   current_risk_score?: number | null;
   criticality: number;
+  products?: string[] | null;
 }
 
 export interface BackendEvent {

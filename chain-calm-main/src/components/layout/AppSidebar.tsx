@@ -110,12 +110,11 @@ export function AppSidebar() {
         >
           <div className="relative flex-shrink-0">
             <AlertTriangle className="w-5 h-5 text-risk-medium" />
-            <span className="absolute -top-1 -right-1 w-2 h-2 bg-risk-medium rounded-full animate-pulse-glow" />
           </div>
           {!collapsed && (
             <div className="overflow-hidden">
-              <p className="text-xs font-medium text-foreground">{alertCount} Active Alerts</p>
-              <p className="text-xs text-muted-foreground">Monitoring</p>
+              <p className="text-xs font-bold text-foreground uppercase tracking-widest">{alertCount} Alerts</p>
+              <p className="text-[10px] text-muted-foreground uppercase tracking-tight">Active Monitoring</p>
             </div>
           )}
         </div>

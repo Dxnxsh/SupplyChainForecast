@@ -487,6 +487,209 @@ def train_news_enriched_model(events):
     logger.info(f"✅ Model saved to {model_path}")
 
 
+def generate_edsf_forecast(events=None, node_name=None, forecast_days=14, session=None, target_date=None):
+    """
+    Generates a 14-day risk forecast using the Event-Driven Decomposed Signal Fusion (EDSF) model.
+    Fuses a Prophet seasonal baseline (trained on outlier-filtered history) with a 
+    Gaussian-decay future news projection, and computes compounding news-sensitive uncertainty intervals.
+    """
+    from sqlalchemy import text
+    
+    if target_date is None:
+        target_date = datetime.now().date()
+    elif isinstance(target_date, str):
+        target_date = datetime.fromisoformat(target_date[:10]).date()
+    elif isinstance(target_date, datetime):
+        target_date = target_date.date()
+        
+    logger.info(f"Generating EDSF forecast for node '{node_name}' as of {target_date}...")
+
+    # --- Step 1: Aggregate Historical Risk ---
+    risk_by_date = defaultdict(float)
+    
+    if session is not None:
+        # Query database directly for history
+        q = text("""
+            SELECT article_timestamp::date AS ds, SUM(risk_score) AS y
+            FROM events
+            WHERE matched_node @> jsonb_build_array(:node_name)
+              AND article_timestamp IS NOT NULL
+              AND risk_score IS NOT NULL
+              AND article_timestamp::date <= :target_date
+            GROUP BY ds
+            ORDER BY ds;
+        """)
+        result = session.execute(q, {"node_name": node_name, "target_date": target_date}).fetchall()
+        for row in result:
+            if row[0]:
+                risk_by_date[row[0]] = float(row[1])
+    else:
+        # Filter from memory events list
+        if not events:
+            events = load_temporal_enriched_events()
+            
+        for e in events:
+            matched = e.get('matched_node')
+            is_match = False
+            if isinstance(matched, list):
+                if node_name in matched:
+                    is_match = True
+            elif matched == node_name:
+                is_match = True
+                
+            if is_match:
+                ts = e.get('article_timestamp')
+                risk_score = e.get('risk_score', 0)
+                if ts and risk_score > 0:
+                    try:
+                        d = pd.to_datetime(ts).date()
+                        if d <= target_date:
+                            risk_by_date[d] += risk_score
+                    except:
+                        continue
+
+    # --- Step 2: Continuous Range & Outlier Filtering ---
+    if risk_by_date:
+        min_date = min(risk_by_date.keys())
+        if (target_date - min_date).days < 30:
+            min_date = target_date - timedelta(days=30)
+    else:
+        min_date = target_date - timedelta(days=30)
+        
+    all_dates = pd.date_range(start=min_date, end=target_date, freq='D').date
+    df = pd.DataFrame({'ds': all_dates, 'y': 0.0})
+    for d, risk in risk_by_date.items():
+        if d in df['ds'].values:
+            df.loc[df['ds'] == d, 'y'] = risk
+            
+    # Calculate 90th percentile of non-zero history to filter extreme outlier spikes
+    non_zero_y = df[df['y'] > 0]['y']
+    if not non_zero_y.empty:
+        threshold = non_zero_y.quantile(0.90)
+        median_val = non_zero_y.median()
+        # Replace extreme historical anomalies with the median to isolate stable operational noise
+        df['y_filtered'] = df['y'].apply(lambda val: median_val if val > threshold else val)
+    else:
+        df['y_filtered'] = df['y']
+
+    # --- Step 3: Compute Baseline ---
+    baseline_forecast = None
+    if len(df[df['y_filtered'] > 0]) >= 2:
+        try:
+            prophet_df = pd.DataFrame({
+                'ds': pd.to_datetime(df['ds']),
+                'y': df['y_filtered']
+            })
+            model = Prophet(
+                daily_seasonality=False,
+                weekly_seasonality=True,
+                yearly_seasonality=True,
+                changepoint_prior_scale=0.05
+            )
+            model.fit(prophet_df)
+            
+            future_dates = [target_date + timedelta(days=i) for i in range(1, forecast_days + 1)]
+            future_df = pd.DataFrame({'ds': pd.to_datetime(future_dates)})
+            forecast = model.predict(future_df)
+            
+            baseline_forecast = forecast[['ds', 'yhat']].copy()
+            baseline_forecast['ds'] = baseline_forecast['ds'].dt.date
+            baseline_forecast['yhat'] = baseline_forecast['yhat'].clip(lower=0)
+        except Exception as e:
+            logger.warning(f"Prophet baseline fit failed for {node_name}: {e}")
+            
+    # Fallback to rolling median if Prophet cannot be fitted or fails
+    if baseline_forecast is None or baseline_forecast.empty:
+        non_zero_filtered = df[df['y_filtered'] > 0]['y_filtered']
+        fallback_median = float(non_zero_filtered.median()) if not non_zero_filtered.empty else 10.0
+        if fallback_median <= 0:
+            fallback_median = 10.0
+        future_dates = [target_date + timedelta(days=i) for i in range(1, forecast_days + 1)]
+        baseline_forecast = pd.DataFrame({
+            'ds': future_dates,
+            'yhat': [fallback_median] * forecast_days
+        })
+
+    # --- Step 4: Gaussian News Signal Temporal Dispersion ---
+    if not events:
+        events = load_temporal_enriched_events()
+        
+    predictive_events = []
+    for e in events:
+        matched = e.get('matched_node')
+        is_match = False
+        if isinstance(matched, list):
+            if node_name in matched:
+                is_match = True
+        elif matched == node_name:
+            is_match = True
+            
+        if is_match:
+            temporal_info = e.get('temporal_info') or {}
+            if temporal_info.get('is_predictive') and temporal_info.get('predicted_date'):
+                predictive_events.append(e)
+                
+    news_by_date = defaultdict(float)
+    sigma = 1.0
+    future_dates = [target_date + timedelta(days=i) for i in range(1, forecast_days + 1)]
+    
+    for fd in future_dates:
+        total_news_risk = 0.0
+        for e in predictive_events:
+            temporal_info = e['temporal_info']
+            pred_date_str = temporal_info['predicted_date']
+            try:
+                pred_date = datetime.fromisoformat(pred_date_str).date()
+            except:
+                continue
+                
+            confidence = temporal_info.get('predicted_date_confidence', 'none')
+            confidence_weight = CONFIDENCE_WEIGHTS.get(confidence, 0.5)
+            weighted_risk = e.get('risk_score', 0) * confidence_weight
+            
+            # Reproject backward/forward relative to target_date using original lead-time
+            days_until = temporal_info.get('days_until_event')
+            if days_until is not None and days_until >= 0:
+                projected_date = target_date + timedelta(days=max(1, days_until))
+            else:
+                projected_date = pred_date
+                
+            delta_days = (fd - projected_date).days
+            if abs(delta_days) <= 3:  # 3-day truncation limit for bell-curve
+                bell_factor = np.exp(-(delta_days ** 2) / (2 * (sigma ** 2)))
+                total_news_risk += weighted_risk * bell_factor
+                
+        news_by_date[fd] = total_news_risk
+
+    # --- Step 5: Decomposed Fusion & Bounds ---
+    forecast_points = []
+    for i in range(1, forecast_days + 1):
+        fd = target_date + timedelta(days=i)
+        
+        baseline_row = baseline_forecast[baseline_forecast['ds'] == fd]
+        baseline_risk = float(baseline_row.iloc[0]['yhat']) if not baseline_row.empty else 10.0
+        
+        news_risk = news_by_date[fd]
+        yhat = baseline_risk + news_risk
+        
+        # Compounding news-sensitive margin formula
+        margin = 30.0 + 4.0 * i + 0.5 * news_risk
+        yhat_lower = max(0.0, yhat - margin)
+        yhat_upper = yhat + margin
+        
+        forecast_points.append({
+            'ds': fd,
+            'yhat': round(yhat, 2),
+            'yhat_lower': round(yhat_lower, 2),
+            'yhat_upper': round(yhat_upper, 2),
+            'news_contribution': round(news_risk, 2),
+            'historical_contribution': round(baseline_risk, 2),
+            'method': 'edsf'
+        })
+        
+    return pd.DataFrame(forecast_points)
+
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()

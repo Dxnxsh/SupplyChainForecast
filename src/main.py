@@ -800,88 +800,113 @@ def get_risk_forecast(
     try:
         target_date = as_of or date.today()
         
-        # 1. Fetch historical risk data for the node up to as_of
-        query = text("""
-            SELECT article_timestamp::date as ds, SUM(risk_score) as y, COUNT(*) as event_count
-            FROM events
-            WHERE matched_node @> jsonb_build_array(:node_name) 
-              AND article_timestamp IS NOT NULL 
-              AND risk_score IS NOT NULL
-              AND article_timestamp::date <= :as_of
-            GROUP BY ds
-            ORDER BY ds;
-        """)
-        result = db.execute(query, {"node_name": node_name, "as_of": target_date}).fetchall()
-        
-        # We need some history to seed the lags (at least 14 days of window, even if mostly 0s)
-        raw_df = pd.DataFrame(result, columns=['ds', 'y', 'event_count'])
-        raw_df['ds'] = pd.to_datetime(raw_df['ds'])
-        
-        # Create a full 30-day window ending at as_of
-        start_date = target_date - timedelta(days=30)
-        full_range = pd.date_range(start=start_date, end=target_date, freq='D')
-        df = pd.DataFrame({'ds': full_range})
-        df = df.merge(raw_df, on='ds', how='left').fillna(0)
-        
-        # 2. Load the XGBoost model (News-Enriched)
-        model_path = "models/forecast_xgboost_news.json"
-        if not os.path.exists(model_path):
-            model_path = "models/forecast_xgboost.json" # Fallback
+        # Try running EDSF forecasting as primary
+        try:
+            from src.predictive_forecasting import generate_edsf_forecast
+            forecast_df = generate_edsf_forecast(
+                node_name=node_name,
+                forecast_days=14,
+                session=db,
+                target_date=target_date
+            )
+            forecast_points = forecast_df.to_dict('records')
             
-        model = xgb.XGBRegressor()
-        model.load_model(model_path)
-        
-        # 3. Load News Projections
-        from src.predictive_forecasting import load_temporal_enriched_events, create_future_risk_projections, get_news_risk_for_date
-        events = load_temporal_enriched_events()
-        news_projections = create_future_risk_projections(events, forecast_days=30)
-        
-        # 4. Recursive Prediction
-        forecast_points = []
-        current_df = df.copy()
-        
-        for i in range(1, 15):
-            next_date = target_date + timedelta(days=i)
-            news_risk = get_news_risk_for_date(news_projections, node_name, next_date)
+            # Map clean dates to strings/dates expected by response schema
+            return [
+                {
+                    "ds": p["ds"],
+                    "yhat": p["yhat"],
+                    "yhat_lower": p["yhat_lower"],
+                    "yhat_upper": p["yhat_upper"],
+                    "news_contribution": p["news_contribution"],
+                    "historical_contribution": p["historical_contribution"],
+                    "method": "xgboost-news"  # Retain tag for UI schema compatibility
+                }
+                for p in forecast_points
+            ]
+        except Exception as edsf_err:
+            logger.warning(f"⚠️ EDSF forecast failed for node '{node_name}', falling back to recursive XGBoost: {edsf_err}", exc_info=True)
             
-            features = {
-                'risk_lag_1': current_df['y'].iloc[-1],
-                'risk_lag_2': current_df['y'].iloc[-2],
-                'risk_lag_3': current_df['y'].iloc[-3],
-                'risk_lag_7': current_df['y'].iloc[-7],
-                'rolling_avg_7': current_df['y'].tail(7).mean(),
-                'news_risk': news_risk
-            }
+            # Legacy Recursive XGBoost Fallback
+            # 1. Fetch historical risk data for the node up to as_of
+            query = text("""
+                SELECT article_timestamp::date as ds, SUM(risk_score) as y, COUNT(*) as event_count
+                FROM events
+                WHERE matched_node @> jsonb_build_array(:node_name) 
+                  AND article_timestamp IS NOT NULL 
+                  AND risk_score IS NOT NULL
+                  AND article_timestamp::date <= :as_of
+                GROUP BY ds
+                ORDER BY ds;
+            """)
+            result = db.execute(query, {"node_name": node_name, "as_of": target_date}).fetchall()
             
-            X = pd.DataFrame([features])
-            yhat = model.predict(X)[0]
-            yhat = max(0, float(yhat)) # Ensure non-negative
+            raw_df = pd.DataFrame(result, columns=['ds', 'y', 'event_count'])
+            raw_df['ds'] = pd.to_datetime(raw_df['ds'])
             
-            next_date = target_date + timedelta(days=i)
-            forecast_points.append({
-                "ds": next_date,
-                "yhat": round(yhat, 2),
-                "yhat_lower": round(yhat * 0.7, 2),
-                "yhat_upper": round(yhat * 1.3, 2),
-                "news_contribution": round(news_risk, 2),
-                "historical_contribution": round(yhat - news_risk if yhat > news_risk else 0, 2)
-            })
+            start_date = target_date - timedelta(days=30)
+            full_range = pd.date_range(start=start_date, end=target_date, freq='D')
+            df = pd.DataFrame({'ds': full_range})
+            df = df.merge(raw_df, on='ds', how='left').fillna(0)
             
-            # Update current_df for next recursion
-            new_row = pd.DataFrame({
-                'ds': [pd.Timestamp(next_date)],
-                'y': [yhat],
-                'event_count': [0]
-            })
-            current_df = pd.concat([current_df, new_row], ignore_index=True)
-
-        return [
-            {
-                **p,
-                "method": "xgboost-news"
-            }
-            for p in forecast_points
-        ]
+            model_path = "models/forecast_xgboost_news.json"
+            if not os.path.exists(model_path):
+                model_path = "models/forecast_xgboost.json"
+                
+            model = xgb.XGBRegressor()
+            model.load_model(model_path)
+            
+            from src.predictive_forecasting import load_temporal_enriched_events, create_future_risk_projections, get_news_risk_for_date
+            events = load_temporal_enriched_events()
+            news_projections = create_future_risk_projections(events, forecast_days=30)
+            
+            forecast_points = []
+            current_df = df.copy()
+            
+            for i in range(1, 15):
+                next_date = target_date + timedelta(days=i)
+                news_risk = get_news_risk_for_date(news_projections, node_name, next_date)
+                
+                features = {
+                    'risk_lag_1': current_df['y'].iloc[-1],
+                    'risk_lag_2': current_df['y'].iloc[-2],
+                    'risk_lag_3': current_df['y'].iloc[-3],
+                    'risk_lag_7': current_df['y'].iloc[-7],
+                    'rolling_avg_7': current_df['y'].tail(7).mean(),
+                    'news_risk': news_risk
+                }
+                
+                X = pd.DataFrame([features])
+                yhat = model.predict(X)[0]
+                yhat = max(0, float(yhat))
+                
+                margin = 35.0 + 5.0 * i + 0.4 * yhat
+                yhat_lower = max(0.0, yhat - margin)
+                yhat_upper = yhat + margin
+                
+                forecast_points.append({
+                    "ds": next_date,
+                    "yhat": round(yhat, 2),
+                    "yhat_lower": round(yhat_lower, 2),
+                    "yhat_upper": round(yhat_upper, 2),
+                    "news_contribution": round(news_risk, 2),
+                    "historical_contribution": round(yhat - news_risk if yhat > news_risk else 0, 2)
+                })
+                
+                new_row = pd.DataFrame({
+                    'ds': [pd.Timestamp(next_date)],
+                    'y': [yhat],
+                    'event_count': [0]
+                })
+                current_df = pd.concat([current_df, new_row], ignore_index=True)
+    
+            return [
+                {
+                    **p,
+                    "method": "xgboost-news"
+                }
+                for p in forecast_points
+            ]
         
     except HTTPException as e:
         raise e

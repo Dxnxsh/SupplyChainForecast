@@ -11,6 +11,7 @@ Supply chain disruption monitoring and forecasting: articles become structured e
 - **Headline tri-class risk** (LOW / MEDIUM / HIGH): TF-IDF + **XGBoost** (`model_training/classifier.pkl` as a **3-tuple**: vectorizer, model, `LabelEncoder`). Used in preprocessing (batch), RSS, and `json_ingest`.
 - **Batch heuristic risk** (`risk_score`, relevance/severity): rule features + **FinBERT** sentiment by default (`src/sentiment_finbert.py`, `src/risk_scoring.py`); set `USE_FINBERT_RISK=0` for VADER.
 - **Disruption + impact** (optional pickles): TF-IDF + categoricals + **XGBoost** classifier + **XGBoost** regressor (`disruption_classifier.pkl`, `impact_regressor_v2.pkl`). Same inference on **RSS** and **batch** via `apply_batch_disruption_and_impact`.
+- **Risk Forecasting**: Recursive Autoregressive (AR) model using **XGBoost** (`models/forecast_xgboost.json`). Replaces Prophet for daily risk score predictions.
 
 Two ways data gets into the database:
 
@@ -78,6 +79,7 @@ npm test
 | `retrain_with_feedback.py` | `classifier.pkl` | Same 3-tuple format as `train_classifier.py` |
 | `evaluate_classifier.py` | — | Loads 2- or 3-tuple `classifier.pkl` |
 | `build_impact_dataset.py`, `build_impact_hard_negative_pack.py` | CSVs | Read DB via `get_read_db_url()` (`DB_READ_URL` optional) |
+| `../scripts/train_forecast_model.py` | `../models/forecast_xgboost.json` | Recursive lag-based XGBoost risk forecaster |
 
 On **macOS**, if `import xgboost` fails, install OpenMP: `brew install libomp`.
 
@@ -159,7 +161,7 @@ FastAPI app version **1.2.0** (see `app = FastAPI(..., version=...)`).
 | GET | `/events/forecasted` | Events with predictive temporal info |
 | GET | `/events/forecasted/by_node/{node_name}` | Node-filtered predictive events |
 | GET | `/summary` | Aggregate stats for dashboard |
-| GET | `/suppliers/{node_name}/forecast` | Prophet points (`ForecastPoint`) |
+| GET | `/suppliers/{node_name}/forecast` | Recursive XGBoost points (`ForecastPoint`); supports `as_of` rewind |
 | GET | `/suppliers/{node_name}/hybrid_forecast` | Hybrid series with news vs historical contributions |
 | POST | `/suppliers/{node_name}/ai-summary` | OpenRouter narrative using rollup + recent events (also mounted at `/api/...` for proxies, hidden from schema) |
 | POST | `/admin/rss-ingest/trigger` | Queue one RSS cycle |

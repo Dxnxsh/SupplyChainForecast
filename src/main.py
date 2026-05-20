@@ -11,10 +11,11 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, date
 import pandas as pd
-from prophet import Prophet
+import xgboost as xgb
 import os
 import logging
 import json
+from datetime import datetime, date, timedelta
 
 from src.db_config import DB_CONNECTION_STRING
 
@@ -788,66 +789,91 @@ def get_dashboard_summary(
         raise HTTPException(status_code=500, detail=f"Could not fetch summary: {e}")
 
 @app.get("/suppliers/{node_name}/forecast", response_model=List[ForecastPoint], tags=["Forecasting"])
-def get_risk_forecast(node_name: str, db: Session = Depends(get_db)):
+def get_risk_forecast(
+    node_name: str, 
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
+    db: Session = Depends(get_db)
+):
     """
-    Generates a 14-day risk score forecast for a specific supplier node using Facebook Prophet.
+    Generates a 14-day risk score forecast for a specific supplier node using recursive XGBoost.
     """
     try:
-        # 1. Fetch historical risk data for the node
+        target_date = as_of or date.today()
+        
+        # 1. Fetch historical risk data for the node up to as_of
         query = text("""
-            SELECT article_timestamp::date as ds, SUM(risk_score) as y
+            SELECT article_timestamp::date as ds, SUM(risk_score) as y, COUNT(*) as event_count
             FROM events
-            WHERE matched_node @> jsonb_build_array(:node_name) AND article_timestamp IS NOT NULL AND risk_score IS NOT NULL
+            WHERE matched_node @> jsonb_build_array(:node_name) 
+              AND article_timestamp IS NOT NULL 
+              AND risk_score IS NOT NULL
+              AND article_timestamp::date <= :as_of
             GROUP BY ds
             ORDER BY ds;
         """)
-        result = db.execute(query, {"node_name": node_name}).fetchall()
+        result = db.execute(query, {"node_name": node_name, "as_of": target_date}).fetchall()
         
-        if len(result) < 2:
-            logger.warning(f"Not enough historical data ({len(result)} points) for node '{node_name}' to generate a forecast.")
-            raise HTTPException(
-                status_code=404,
-                detail=f"Not enough historical data to generate a forecast for '{node_name}'. Need at least 2 days of data."
-            )
-
-        # 2. Prepare data for Prophet — zero-fill gaps so seasonality has enough points
-        raw_df = pd.DataFrame(result, columns=['ds', 'y'])
+        # We need some history to seed the lags (at least 14 days of window, even if mostly 0s)
+        raw_df = pd.DataFrame(result, columns=['ds', 'y', 'event_count'])
         raw_df['ds'] = pd.to_datetime(raw_df['ds'])
-        raw_df['y'] = pd.to_numeric(raw_df['y'])
+        
+        # Create a full 30-day window ending at as_of
+        start_date = target_date - timedelta(days=30)
+        full_range = pd.date_range(start=start_date, end=target_date, freq='D')
+        df = pd.DataFrame({'ds': full_range})
+        df = df.merge(raw_df, on='ds', how='left').fillna(0)
+        
+        # 2. Load the XGBoost model
+        model_path = "models/forecast_xgboost.json"
+        if not os.path.exists(model_path):
+            raise HTTPException(status_code=500, detail="Forecast model not found. Please train the model first.")
+        
+        model = xgb.XGBRegressor()
+        model.load_model(model_path)
+        
+        # 3. Recursive Prediction
+        forecast_points = []
+        current_df = df.copy()
+        
+        for i in range(1, 15):
+            # Prepare features for the next day
+            # Features: risk_lag_1-7, rolling_avg_7, rolling_avg_14, event_count_7
+            last_row = current_df.iloc[-1]
+            
+            features = {
+                'risk_lag_1': current_df['y'].iloc[-1],
+                'risk_lag_2': current_df['y'].iloc[-2] if len(current_df) > 1 else 0,
+                'risk_lag_3': current_df['y'].iloc[-3] if len(current_df) > 2 else 0,
+                'risk_lag_4': current_df['y'].iloc[-4] if len(current_df) > 3 else 0,
+                'risk_lag_5': current_df['y'].iloc[-5] if len(current_df) > 4 else 0,
+                'risk_lag_6': current_df['y'].iloc[-6] if len(current_df) > 5 else 0,
+                'risk_lag_7': current_df['y'].iloc[-7] if len(current_df) > 6 else 0,
+                'rolling_avg_7': current_df['y'].tail(7).mean(),
+                'rolling_avg_14': current_df['y'].tail(14).mean(),
+                'event_count_7': current_df['event_count'].tail(7).sum()
+            }
+            
+            X = pd.DataFrame([features])
+            yhat = model.predict(X)[0]
+            yhat = max(0, float(yhat)) # Ensure non-negative
+            
+            next_date = target_date + timedelta(days=i)
+            forecast_points.append({
+                "ds": next_date,
+                "yhat": round(yhat, 2),
+                "yhat_lower": round(yhat * 0.8, 2), # Simple heuristic for intervals
+                "yhat_upper": round(yhat * 1.2, 2)
+            })
+            
+            # Update current_df for next recursion
+            new_row = pd.DataFrame({
+                'ds': [pd.Timestamp(next_date)],
+                'y': [yhat],
+                'event_count': [0] # Assume no new events in the future for risk decay
+            })
+            current_df = pd.concat([current_df, new_row], ignore_index=True)
 
-        full_range = pd.date_range(start=raw_df['ds'].min(), end=raw_df['ds'].max(), freq='D')
-        df = pd.DataFrame({'ds': full_range, 'y': 0.0})
-        df = df.merge(raw_df.rename(columns={'y': 'y_actual'}), on='ds', how='left')
-        df['y'] = df['y_actual'].fillna(df['y'])
-        df = df[['ds', 'y']]
-
-        # 3. Train the Prophet model
-        model = Prophet(
-            daily_seasonality=False, 
-            weekly_seasonality=True, 
-            yearly_seasonality=True,
-            changepoint_prior_scale=0.05
-        )
-        model.fit(df)
-        
-        # 4. Generate future dates and make a prediction
-        future = model.make_future_dataframe(periods=14) # Forecast for the next 14 days
-        forecast = model.predict(future)
-        
-        # 5. Format the response
-        forecast_data = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(14).copy()
-        
-        # Clip values to ensure they are non-negative
-        forecast_data['yhat'] = forecast_data['yhat'].clip(lower=0)
-        forecast_data['yhat_lower'] = forecast_data['yhat_lower'].clip(lower=0)
-        forecast_data['yhat_upper'] = forecast_data['yhat_upper'].clip(lower=0)
-        
-        # Convert 'ds' to date object for Pydantic model
-        forecast_data['ds'] = forecast_data['ds'].dt.date
-
-        # Convert DataFrame to a list of dictionaries for Pydantic
-        response_data = forecast_data.to_dict('records')
-        return response_data
+        return forecast_points
         
     except HTTPException as e:
         raise e

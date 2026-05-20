@@ -121,11 +121,30 @@ def unload_ner():
     global _ner_pipeline
     if _ner_pipeline is not None:
         print("📉 Unloading NER model from RAM...")
+        # Explicitly clear internal references to help GC
+        try:
+            if hasattr(_ner_pipeline, "model"):
+                _ner_pipeline.model.to("cpu")
+                del _ner_pipeline.model
+            if hasattr(_ner_pipeline, "tokenizer"):
+                del _ner_pipeline.tokenizer
+        except Exception:
+            pass
+            
         _ner_pipeline = None
+        
+        # Multiple GC passes
         gc.collect()
+        gc.collect()
+        
         try:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                try:
+                    torch.mps.empty_cache()
+                except Exception:
+                    pass
         except Exception:
             pass
 

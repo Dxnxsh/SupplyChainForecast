@@ -336,7 +336,7 @@ export default function ResilienceHistoryPage() {
                     <Line
                       type="monotone"
                       dataKey="predicted"
-                      name="Predicted (Prophet snapshot)"
+                      name="Predicted (XGBoost snapshot)"
                       stroke="hsl(250, 60%, 60%)"
                       strokeWidth={2}
                       dot={false}

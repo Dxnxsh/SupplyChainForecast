@@ -96,16 +96,33 @@ def unload_finbert():
     global _pipeline
     if _pipeline is not None:
         print("📉 Unloading FinBERT model from RAM...")
+        # Explicitly clear internal references to help GC
+        try:
+            if hasattr(_pipeline, "model"):
+                _pipeline.model.to("cpu")
+                del _pipeline.model
+            if hasattr(_pipeline, "tokenizer"):
+                del _pipeline.tokenizer
+        except Exception:
+            pass
+            
         _pipeline = None
+        
+        # Multiple GC passes to catch circular references
         gc.collect()
-        # If using CUDA, try to clear cache
+        gc.collect()
+        
+        # If using CUDA or MPS, try to clear cache
         try:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                # MPS doesn't have an explicit empty_cache but gc.collect() helps
-                pass
+                # On modern torch, mps.empty_cache() exists
+                try:
+                    torch.mps.empty_cache()
+                except Exception:
+                    pass
         except Exception:
             pass
 

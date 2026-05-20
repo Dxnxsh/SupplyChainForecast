@@ -209,27 +209,36 @@ def apply_batch_disruption_and_impact(events: list[dict]) -> None:
         "IMPACT_REGRESSOR_PATH",
         str(PROJECT_ROOT / "model_training" / "impact_regressor_v2.pkl"),
     )
-    disruption_payload = load_disruption_classifier(disruption_path)
-    impact_payload = load_impact_regressor(impact_path)
-    if not disruption_payload and not impact_payload:
-        print(
-            "ℹ️ Skipping disruption/impact: no valid pickles "
-            f"(disruption={disruption_path!s}, impact={impact_path!s})."
-        )
-        return
+    disruption_payload = None
+    impact_payload = None
     try:
-        from src.load_to_db import SUPPLIER_NODES
-    except Exception:
-        SUPPLIER_NODES = {}
-    for ev in events:
-        node = ev.get("matched_node")
-        ev["node_criticality"] = (
-            SUPPLIER_NODES.get(node, {}).get("criticality", 1) if node else 1
-        )
-    if disruption_payload:
-        attach_disruption_probabilities(events, disruption_payload)
-    if impact_payload:
-        attach_predicted_impact_scores(events, impact_payload)
+        disruption_payload = load_disruption_classifier(disruption_path)
+        impact_payload = load_impact_regressor(impact_path)
+        if not disruption_payload and not impact_payload:
+            print(
+                "ℹ️ Skipping disruption/impact: no valid pickles "
+                f"(disruption={disruption_path!s}, impact={impact_path!s})."
+            )
+            return
+        try:
+            from src.load_to_db import SUPPLIER_NODES
+        except Exception:
+            SUPPLIER_NODES = {}
+        for ev in events:
+            node = ev.get("matched_node")
+            ev["node_criticality"] = (
+                SUPPLIER_NODES.get(node, {}).get("criticality", 1) if node else 1
+            )
+        if disruption_payload:
+            attach_disruption_probabilities(events, disruption_payload)
+        if impact_payload:
+            attach_predicted_impact_scores(events, impact_payload)
+    finally:
+        if disruption_payload:
+            del disruption_payload
+        if impact_payload:
+            del impact_payload
+        gc.collect()
 
 
 def attach_disruption_probabilities(events: list[dict], classifier_payload: dict) -> None:
@@ -582,31 +591,62 @@ def run_once(
         raise e
     finally:
         # --- Memory Cleanup ---
-        # 1. Unload Transformer models (FinBERT, NER)
+        # 1. Unload Transformer models (FinBERT, NER, spaCy)
         try:
             from src.sentiment_finbert import unload_finbert
             from src.preprocessing import unload_ner
+            from src.temporal_extraction import unload_nlp
             unload_finbert()
             unload_ner()
+            unload_nlp()
         except ImportError:
             pass
 
         # 2. Clear local XGBoost model objects
-        print("📉 Clearing local XGBoost models...")
-        if 'vectorizer' in locals(): del vectorizer
-        if 'model' in locals(): del model
-        if 'label_encoder' in locals(): del label_encoder
-        if 'disruption_payload' in locals(): del disruption_payload
-        if 'impact_payload' in locals(): del impact_payload
+        print("📉 Clearing local XGBoost models and vectorizers...")
+        if 'vectorizer' in locals():
+            print(f"  - Deleting vectorizer")
+            del vectorizer
+        if 'model' in locals():
+            print(f"  - Deleting model")
+            del model
+        if 'label_encoder' in locals():
+            print(f"  - Deleting label_encoder")
+            del label_encoder
+        if 'disruption_payload' in locals():
+            print(f"  - Deleting disruption_payload")
+            del disruption_payload
+        if 'impact_payload' in locals():
+            print(f"  - Deleting impact_payload")
+            del impact_payload
         
-        # 3. Force garbage collection
+        # 3. Force multiple garbage collection passes
         gc.collect()
+        gc.collect()
+        gc.collect()
+        
         try:
             import torch
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                try:
+                    import torch
+                    torch.mps.empty_cache()
+                except Exception:
+                    pass
         except Exception:
             pass
+
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            mem_mb = process.memory_info().rss / (1024 * 1024)
+            print(f"📊 Current Resident Memory (RSS): {mem_mb:.2f} MB")
+        except (ImportError, Exception):
+            pass
+
         print("✅ RSS pipeline memory cleanup complete.")
 
 

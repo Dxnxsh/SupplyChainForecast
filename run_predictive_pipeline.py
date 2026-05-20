@@ -236,108 +236,148 @@ def main():
         print("❌ Please install missing dependencies first.")
         sys.exit(1)
 
-    runtime = resolve_runtime_config(args)
-    skip_preprocessing = runtime["skip_preprocessing"]
-    skip_optional = runtime["skip_optional"]
-    save_intermediate = runtime["save_intermediate"]
+    try:
+        runtime = resolve_runtime_config(args)
+        skip_preprocessing = runtime["skip_preprocessing"]
+        skip_optional = runtime["skip_optional"]
+        save_intermediate = runtime["save_intermediate"]
 
-    if skip_preprocessing:
-        print("\n⏭️  Will skip preprocessing (using existing processed_events.jsonl)")
-    else:
-        print("\n▶️  Will run preprocessing from raw data")
-
-    if skip_optional:
-        print("⚠️  Optional temporal + forecasting steps are disabled.")
-    else:
-        print("✨ Optional temporal + forecasting steps are enabled.")
-
-    if save_intermediate:
-        print("💾 Intermediate JSONL files will be written to disk.")
-    else:
-        print("🧠 Running mostly in-memory (no intermediate writes).")
-
-    if args.no_db_load:
-        print("🧪 DB load step is disabled (--no-db-load).")
-
-    # Check for required data files
-    if not check_data_files(skip_preprocessing):
         if skip_preprocessing:
-            print("❌ Cannot skip preprocessing without existing preprocessed data.")
-            print("   Please run preprocessing first or add raw data.")
+            print("\n⏭️  Will skip preprocessing (using existing processed_events.jsonl)")
         else:
-            print("❌ Please add raw news data to data/raw/web_scrape/")
-        sys.exit(1)
-    print("\n🚀 Starting in-memory pipeline execution...")
+            print("\n▶️  Will run preprocessing from raw data")
 
-    # --- Step 1: Preprocessing ---
-    preprocessing_step_name = "1. Preprocessing"
-    if skip_preprocessing:
-        events = run_step(preprocessing_step_name, load_preprocessed_data_from_file)
-        print(f"📦 Loaded {len(events)} preprocessed events from disk.")
-    else:
-        events = run_step(preprocessing_step_name, process_all_data, save_to_disk=save_intermediate)
+        if skip_optional:
+            print("⚠️  Optional temporal + forecasting steps are disabled.")
+        else:
+            print("✨ Optional temporal + forecasting steps are enabled.")
 
-    if not events:
-        print("❌ Pipeline failed: No events to process.")
-        sys.exit(1)
-
-    # --- Step 2: Filter Events ---
-    events = run_step("2. Filter Events", filter_events, events)
-    if save_intermediate:
-        save_filtered_data(events)
-
-    if not events:
-        print("❌ Pipeline failed: All events were filtered out.")
-        sys.exit(1)
-
-    # --- Step 3: Risk Scoring ---
-    events = run_step("3. Risk Scoring", score_all_events, events)
-    if save_intermediate:
-        save_scored_data(events)
-
-    # --- Step 4: Geocoding ---
-    events = run_step("4. Geocoding", geocode_events, events)
-    if save_intermediate:
-        save_geocoded_data(events)
-
-    # --- Step 5: Match to Supply Chain Nodes ---
-    events = run_step("5. Match to Supply Chain Nodes", match_all_events, events)
-    if save_intermediate:
-        save_matched_events(events)
-
-    # Optional Steps
-    if not skip_optional:
-        # --- Step 6: Temporal Extraction ---
-        events = run_step("6. Temporal Extraction", enrich_events_with_temporal_data, events)
         if save_intermediate:
-            save_temporal_enriched_data(events)
-
-    # --- Disruption & impact (XGBoost pickles, same as RSS) ---
-    print("\n▶️  Disruption & impact models (optional; env DISRUPTION_CLASSIFIER_PATH / IMPACT_REGRESSOR_PATH)")
-    from src.rss_ingest import apply_batch_disruption_and_impact
-
-    run_step("Disruption & Impact Inference", apply_batch_disruption_and_impact, events)
-
-    if not skip_optional:
-        # --- Step 7: Predictive Forecasting ---
-        run_step("7. Predictive Forecasting", generate_all_node_forecasts, events, forecast_days=args.forecast_days)
-
-    # --- Step 8: Load to Database ---
-    db_loaded = False
-    if args.no_db_load:
-        print("\n⏭️  8. Load to Database skipped.")
-    else:
-        print("\n▶️  8. Load to Database")
-        engine = get_db_engine()
-        if engine:
-            run_step("Create DB tables", create_tables, engine)
-            run_step("Populate database", populate_database, engine, events)
-            db_loaded = True
+            print("💾 Intermediate JSONL files will be written to disk.")
         else:
-            print("❌ Could not connect to database, skipping data load.")
+            print("🧠 Running mostly in-memory (no intermediate writes).")
 
-    # Summary
-    print_summary(forecasts_ran=not skip_optional, db_loaded=db_loaded)
+        if args.no_db_load:
+            print("🧪 DB load step is disabled (--no-db-load).")
+
+        # Check for required data files
+        if not check_data_files(skip_preprocessing):
+            if skip_preprocessing:
+                print("❌ Cannot skip preprocessing without existing preprocessed data.")
+                print("   Please run preprocessing first or add raw data.")
+            else:
+                print("❌ Please add raw news data to data/raw/web_scrape/")
+            sys.exit(1)
+        print("\n🚀 Starting in-memory pipeline execution...")
+
+        # --- Step 1: Preprocessing ---
+        preprocessing_step_name = "1. Preprocessing"
+        if skip_preprocessing:
+            events = run_step(preprocessing_step_name, load_preprocessed_data_from_file)
+            print(f"📦 Loaded {len(events)} preprocessed events from disk.")
+        else:
+            events = run_step(preprocessing_step_name, process_all_data, save_to_disk=save_intermediate)
+
+        if not events:
+            print("❌ Pipeline failed: No events to process.")
+            sys.exit(1)
+
+        # --- Step 2: Filter Events ---
+        events = run_step("2. Filter Events", filter_events, events)
+        if save_intermediate:
+            save_filtered_data(events)
+
+        if not events:
+            print("❌ Pipeline failed: All events were filtered out.")
+            sys.exit(1)
+
+        # --- Step 3: Risk Scoring ---
+        events = run_step("3. Risk Scoring", score_all_events, events)
+        if save_intermediate:
+            save_scored_data(events)
+
+        # --- Step 4: Geocoding ---
+        events = run_step("4. Geocoding", geocode_events, events)
+        if save_intermediate:
+            save_geocoded_data(events)
+
+        # --- Step 5: Match to Supply Chain Nodes ---
+        events = run_step("5. Match to Supply Chain Nodes", match_all_events, events)
+        if save_intermediate:
+            save_matched_events(events)
+
+        # Optional Steps
+        if not skip_optional:
+            # --- Step 6: Temporal Extraction ---
+            events = run_step("6. Temporal Extraction", enrich_events_with_temporal_data, events)
+            if save_intermediate:
+                save_temporal_enriched_data(events)
+
+        # --- Disruption & impact (XGBoost pickles, same as RSS) ---
+        print("\n▶️  Disruption & impact models (optional; env DISRUPTION_CLASSIFIER_PATH / IMPACT_REGRESSOR_PATH)")
+        from src.rss_ingest import apply_batch_disruption_and_impact
+
+        run_step("Disruption & Impact Inference", apply_batch_disruption_and_impact, events)
+
+        if not skip_optional:
+            # --- Step 7: Predictive Forecasting ---
+            run_step("7. Predictive Forecasting", generate_all_node_forecasts, events, forecast_days=args.forecast_days)
+
+        # --- Step 8: Load to Database ---
+        db_loaded = False
+        if args.no_db_load:
+            print("\n⏭️  8. Load to Database skipped.")
+        else:
+            print("\n▶️  8. Load to Database")
+            engine = get_db_engine()
+            if engine:
+                run_step("Create DB tables", create_tables, engine)
+                run_step("Populate database", populate_database, engine, events)
+                db_loaded = True
+            else:
+                print("❌ Could not connect to database, skipping data load.")
+
+        # Summary
+        print_summary(forecasts_ran=not skip_optional, db_loaded=db_loaded)
+    finally:
+        print("\n🧹 Cleaning up ML models and memory...")
+        try:
+            from src.sentiment_finbert import unload_finbert
+            from src.preprocessing import unload_ner
+            from src.temporal_extraction import unload_nlp
+            unload_finbert()
+            unload_ner()
+            unload_nlp()
+        except ImportError:
+            pass
+
+        import gc
+        gc.collect()
+        gc.collect()
+        gc.collect()
+        
+        try:
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+                try:
+                    torch.mps.empty_cache()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        try:
+            import psutil
+            import os
+            process = psutil.Process(os.getpid())
+            mem_mb = process.memory_info().rss / (1024 * 1024)
+            print(f"📊 Current Resident Memory (RSS): {mem_mb:.2f} MB")
+        except (ImportError, Exception):
+            pass
+
+        print("✅ Memory cleanup complete.")
 
 
 if __name__ == "__main__":

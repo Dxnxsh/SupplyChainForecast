@@ -12,12 +12,27 @@ from dateutil import parser as date_parser
 from dateutil.relativedelta import relativedelta
 import spacy
 
-# Load spaCy model for NER (Named Entity Recognition)
-try:
-    nlp = spacy.load("en_core_web_sm")
-except:
-    print("⚠️  Warning: spaCy model not loaded. Run: python -m spacy download en_core_web_sm")
-    nlp = None
+def get_nlp():
+    global nlp
+    if nlp is None:
+        try:
+            print("Loading spaCy model (en_core_web_sm)...")
+            nlp = spacy.load("en_core_web_sm")
+        except:
+            print("⚠️  Warning: spaCy model not loaded. Run: python -m spacy download en_core_web_sm")
+            nlp = None
+    return nlp
+
+def unload_nlp():
+    global nlp
+    if nlp is not None:
+        print("📉 Unloading spaCy model from RAM...")
+        nlp = None
+        import gc
+        gc.collect()
+
+# Initial load is lazy now
+nlp = None
 
 # --- Temporal Keywords and Patterns ---
 
@@ -118,10 +133,11 @@ EVENT_TEMPORAL_PATTERNS = {
 
 def extract_dates_with_spacy(text):
     """Extract dates using spaCy NER."""
-    if not nlp:
+    _nlp = get_nlp()
+    if not _nlp:
         return []
     
-    doc = nlp(text)
+    doc = _nlp(text)
     dates = []
     for ent in doc.ents:
         if ent.label_ == "DATE":

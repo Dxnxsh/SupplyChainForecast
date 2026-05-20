@@ -108,10 +108,15 @@ def create_future_risk_projections(events, forecast_days=14):
         predicted_date_str = temporal_info['predicted_date']
         confidence = temporal_info.get('predicted_date_confidence', 'none')
         risk_score = event.get('risk_score', 0)
-        node_name = event.get('matched_node')
-        
-        if not node_name or risk_score == 0:
+        node_name_raw = event.get('matched_node')
+        if not node_name_raw or risk_score == 0:
             continue
+
+        # Handle matched_node being either a string or a list of strings
+        if isinstance(node_name_raw, list):
+            target_nodes = node_name_raw
+        else:
+            target_nodes = [node_name_raw]
         
         try:
             predicted_date = datetime.fromisoformat(predicted_date_str).date()
@@ -147,10 +152,23 @@ def create_future_risk_projections(events, forecast_days=14):
                     decay = TIME_DECAY_FACTOR ** abs(offset)
                 
                 projected_risk = weighted_risk * decay
-                future_risk_by_date_node[projection_date][node_name] += projected_risk
+                for node_name in target_nodes:
+                    if node_name: # Ensure node_name is not None or empty
+                        future_risk_by_date_node[projection_date][node_name] += projected_risk
     
     logger.info(f"Generated projections for {len(future_risk_by_date_node)} dates")
     return future_risk_by_date_node
+
+
+def get_news_risk_for_date(future_risk_by_date, node_name, target_date):
+    """
+    Returns aggregated news risk for a specific node and date from the projection dict.
+    """
+    if isinstance(target_date, datetime):
+        target_date = target_date.date()
+    
+    date_data = future_risk_by_date.get(target_date, {})
+    return date_data.get(node_name, 0.0)
 
 
 def get_historical_prophet_forecast(events, node_name, forecast_days=14):
@@ -159,7 +177,14 @@ def get_historical_prophet_forecast(events, node_name, forecast_days=14):
     Returns a DataFrame with dates and forecasted values.
     """
     # Filter events for this node
-    node_events = [e for e in events if e.get('matched_node') == node_name]
+    node_events = []
+    for e in events:
+        matched = e.get('matched_node')
+        if isinstance(matched, list):
+            if node_name in matched:
+                node_events.append(e)
+        elif matched == node_name:
+            node_events.append(e)
     
     if not node_events:
         return None
@@ -242,7 +267,14 @@ def create_hybrid_forecast(events, node_name, forecast_days=14, alpha=0.6):
     prophet_forecast = get_historical_prophet_forecast(events, node_name, forecast_days)
 
     if prophet_forecast is None:
-        node_events = [e for e in events if e.get('matched_node') == node_name]
+        node_events = []
+        for e in events:
+            matched = e.get('matched_node')
+            if isinstance(matched, list):
+                if node_name in matched:
+                    node_events.append(e)
+            elif matched == node_name:
+                node_events.append(e)
         prophet_forecast = _build_recent_average_baseline(node_events, forecast_days)
     
     # Create date range for forecast
@@ -371,32 +403,100 @@ def analyze_forecast_drivers(forecast_df):
     }
 
 
+def prepare_training_data_with_news(events, start_date="2025-07-01", end_date="2026-05-20"):
+    """
+    Prepares training data by joining historical risk with news projections.
+    """
+    logger.info(f"Preparing training data from {start_date} to {end_date}...")
+    
+    # 1. Calculate future_risk_by_date for the whole range
+    # We use a large forecast_days to cover the whole training period
+    news_risk_projections = create_future_risk_projections(events, forecast_days=365)
+    
+    training_rows = []
+    
+    # 2. Extract daily actual risk from events for each node
+    from src.load_to_db import SUPPLIER_NODES
+    nodes = list(SUPPLIER_NODES.keys())
+    
+    all_dates = pd.date_range(start=start_date, end=end_date, freq='D').date
+    
+    for node in nodes:
+        # Get actual risk for this node
+        node_actuals = defaultdict(float)
+        for e in events:
+            matched = e.get('matched_node')
+            if (isinstance(matched, list) and node in matched) or (matched == node):
+                ts = e.get('article_timestamp')
+                if ts:
+                    try:
+                        d = pd.to_datetime(ts).date()
+                        node_actuals[d] += e.get('risk_score', 0)
+                    except:
+                        continue
+        
+        # Build features for each date
+        node_history = pd.DataFrame({'ds': all_dates, 'y': [node_actuals.get(d, 0.0) for d in all_dates]})
+        
+        for i in range(14, len(node_history)):
+            current_date = node_history.iloc[i]['ds']
+            y_target = node_history.iloc[i]['y']
+            
+            # Lag features
+            features = {
+                'target': y_target,
+                'risk_lag_1': node_history.iloc[i-1]['y'],
+                'risk_lag_2': node_history.iloc[i-2]['y'],
+                'risk_lag_3': node_history.iloc[i-3]['y'],
+                'risk_lag_7': node_history.iloc[i-7]['y'],
+                'rolling_avg_7': node_history.iloc[i-7:i]['y'].mean(),
+                'news_risk': get_news_risk_for_date(news_risk_projections, node, current_date)
+            }
+            training_rows.append(features)
+            
+    return pd.DataFrame(training_rows)
+
+
+def train_news_enriched_model(events):
+    """
+    Trains and saves the news-enriched XGBoost model.
+    """
+    df = prepare_training_data_with_news(events)
+    if df.empty:
+        logger.error("No training data generated.")
+        return
+    
+    import xgboost as xgb
+    X = df.drop(columns=['target'])
+    y = df['target']
+    
+    model = xgb.XGBRegressor(
+        n_estimators=100,
+        learning_rate=0.1,
+        max_depth=5,
+        random_state=42
+    )
+    
+    logger.info(f"Training XGBoost on {len(df)} rows...")
+    model.fit(X, y)
+    
+    model_dir = "models"
+    os.makedirs(model_dir, exist_ok=True)
+    model_path = os.path.join(model_dir, "forecast_xgboost_news.json")
+    model.save_model(model_path)
+    logger.info(f"✅ Model saved to {model_path}")
+
+
 if __name__ == "__main__":
-    # Load temporal enriched events
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--train", action="store_true")
+    args = parser.parse_args()
+    
     events = load_temporal_enriched_events()
-    
-    if not events:
-        print("❌ No temporal enriched events found. Run temporal_extraction.py first.")
-        exit(1)
-    
-    print(f"\n📊 Loaded {len(events)} events")
-    
-    # Generate forecasts for all nodes
-    forecasts = generate_all_node_forecasts(events, forecast_days=14)
-    
-    print(f"\n✅ Generated forecasts for {len(forecasts)} nodes")
-    
-    # Show example analysis for first node
-    if forecasts:
-        example_node = list(forecasts.keys())[0]
-        example_forecast = pd.DataFrame(forecasts[example_node])
-        
-        print(f"\n📈 Example Forecast Analysis for '{example_node}':")
-        analysis = analyze_forecast_drivers(example_forecast)
-        for key, value in analysis.items():
-            print(f"  {key}: {value}")
-        
-        print("\n📅 First 7 days of forecast:")
-        for _, row in example_forecast.head(7).iterrows():
-            print(f"  {row['ds']}: Risk={row['yhat']:.1f} (News={row['news_contribution']:.1f}, Historical={row['historical_contribution']:.1f}) [{row['method']}]")
+    if args.train:
+        train_news_enriched_model(events)
+    else:
+        # Original main logic (optional)
+        pass
 

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 logger = logging.getLogger(__name__)
 
 METHOD_PROPHET = "prophet"
+METHOD_XGBOOST = "xgboost"
 SOURCE_SCHEDULED = "scheduled"
 SOURCE_ON_DEMAND = "on_demand"
 
@@ -55,7 +56,7 @@ def generate_prophet_horizon_14(session: Session, node_name: str, forecast_date:
         """
         SELECT article_timestamp::date AS ds, SUM(risk_score) AS y
         FROM events
-        WHERE matched_node = :node_name
+        WHERE matched_node @> jsonb_build_array(:node_name)
           AND article_timestamp IS NOT NULL
           AND risk_score IS NOT NULL
           AND article_timestamp::date <= :forecast_date
@@ -105,6 +106,84 @@ def generate_prophet_horizon_14(session: Session, node_name: str, forecast_date:
     pred["ds"] = pred["ds"].dt.date
 
     return pred.to_dict("records")
+ 
+ 
+def generate_xgboost_horizon_14(session: Session, node_name: str, forecast_date: date) -> List[dict]:
+    """
+    Generate 14-day forecast using the recursive XGBoost model.
+    """
+    import xgboost as xgb
+    import os
+ 
+    q = text(
+        """
+        SELECT article_timestamp::date AS ds, SUM(risk_score) AS y, COUNT(*) as event_count
+        FROM events
+        WHERE matched_node @> jsonb_build_array(:node_name)
+          AND article_timestamp IS NOT NULL
+          AND risk_score IS NOT NULL
+          AND article_timestamp::date <= :forecast_date
+        GROUP BY ds
+        ORDER BY ds;
+        """
+    )
+    result = session.execute(
+        q, {"node_name": node_name, "forecast_date": forecast_date}
+    ).fetchall()
+ 
+    raw_df = pd.DataFrame(result, columns=["ds", "y", "event_count"])
+    raw_df["ds"] = pd.to_datetime(raw_df["ds"])
+ 
+    # Create 30-day window to seed lags
+    start_date = forecast_date - timedelta(days=30)
+    full_range = pd.date_range(start=start_date, end=forecast_date, freq="D")
+    df = pd.DataFrame({"ds": full_range})
+    df = df.merge(raw_df, on="ds", how="left").fillna(0)
+ 
+    model_path = "models/forecast_xgboost_news.json"
+    if not os.path.exists(model_path):
+        model_path = "models/forecast_xgboost.json" # Fallback
+ 
+    model = xgb.XGBRegressor()
+    model.load_model(model_path)
+    
+    # Load News Projections
+    from src.predictive_forecasting import load_temporal_enriched_events, create_future_risk_projections, get_news_risk_for_date
+    events = load_temporal_enriched_events()
+    news_projections = create_future_risk_projections(events, forecast_days=30)
+ 
+    forecast_points = []
+    current_df = df.copy()
+ 
+    for i in range(1, 15):
+        next_date = forecast_date + timedelta(days=i)
+        news_risk = get_news_risk_for_date(news_projections, node_name, next_date)
+        
+        features = {
+            "risk_lag_1": current_df["y"].iloc[-1],
+            "risk_lag_2": current_df["y"].iloc[-2],
+            "risk_lag_3": current_df["y"].iloc[-3],
+            "risk_lag_7": current_df["y"].iloc[-7],
+            "rolling_avg_7": current_df["y"].tail(7).mean(),
+            "news_risk": news_risk
+        }
+        X = pd.DataFrame([features])
+        yhat = max(0, float(model.predict(X)[0]))
+ 
+        forecast_points.append(
+            {
+                "ds": next_date,
+                "yhat": round(yhat, 2),
+                "yhat_lower": round(yhat * 0.7, 2),
+                "yhat_upper": round(yhat * 1.3, 2),
+            }
+        )
+        new_row = pd.DataFrame(
+            {"ds": [pd.Timestamp(next_date)], "y": [yhat], "event_count": [0]}
+        )
+        current_df = pd.concat([current_df, new_row], ignore_index=True)
+ 
+    return forecast_points
 
 
 def persist_snapshot_rows(
@@ -113,6 +192,7 @@ def persist_snapshot_rows(
     forecast_date: date,
     rows: Sequence[dict],
     source: str,
+    method: str = METHOD_PROPHET,
 ) -> None:
     stmt = text(
         """
@@ -134,13 +214,13 @@ def persist_snapshot_rows(
                 "yhat": float(r["yhat"]),
                 "yhat_lower": float(r["yhat_lower"]),
                 "yhat_upper": float(r["yhat_upper"]),
-                "method": METHOD_PROPHET,
+                "method": method,
                 "source": source,
             },
         )
 
 
-def snapshot_exists(session: Session, node_name: str, forecast_date: date) -> bool:
+def snapshot_exists(session: Session, node_name: str, forecast_date: date, method: str = METHOD_PROPHET) -> bool:
     n = session.execute(
         text(
             """
@@ -148,12 +228,12 @@ def snapshot_exists(session: Session, node_name: str, forecast_date: date) -> bo
             WHERE node_name = :n AND forecast_date = :fd AND method = :m
             """
         ),
-        {"n": node_name, "fd": forecast_date, "m": METHOD_PROPHET},
+        {"n": node_name, "fd": forecast_date, "m": method},
     ).scalar()
     return (n or 0) >= 14
 
 
-def load_snapshot_rows(session: Session, node_name: str, forecast_date: date) -> List[dict]:
+def load_snapshot_rows(session: Session, node_name: str, forecast_date: date, method: str = METHOD_PROPHET) -> List[dict]:
     rows = session.execute(
         text(
             """
@@ -163,7 +243,7 @@ def load_snapshot_rows(session: Session, node_name: str, forecast_date: date) ->
             ORDER BY horizon_day
             """
         ),
-        {"n": node_name, "fd": forecast_date, "m": METHOD_PROPHET},
+        {"n": node_name, "fd": forecast_date, "m": method},
     ).fetchall()
     out = []
     for r in rows:
@@ -180,7 +260,7 @@ def load_snapshot_rows(session: Session, node_name: str, forecast_date: date) ->
     return out
 
 
-def list_snapshot_dates(session: Session, node_name: Optional[str] = None) -> List[date]:
+def list_snapshot_dates(session: Session, node_name: Optional[str] = None, method: str = METHOD_PROPHET) -> List[date]:
     if node_name:
         rows = session.execute(
             text(
@@ -190,7 +270,7 @@ def list_snapshot_dates(session: Session, node_name: Optional[str] = None) -> Li
                 ORDER BY forecast_date DESC
                 """
             ),
-            {"n": node_name, "m": METHOD_PROPHET},
+            {"n": node_name, "m": method},
         ).fetchall()
     else:
         rows = session.execute(
@@ -201,7 +281,7 @@ def list_snapshot_dates(session: Session, node_name: Optional[str] = None) -> Li
                 ORDER BY forecast_date DESC
                 """
             ),
-            {"m": METHOD_PROPHET},
+            {"m": method},
         ).fetchall()
     return [r[0] for r in rows]
 
@@ -217,7 +297,7 @@ def fetch_actuals_for_horizon(
         """
         SELECT article_timestamp::date AS ds, COALESCE(SUM(risk_score), 0)::double precision AS y
         FROM events
-        WHERE matched_node = :node_name
+        WHERE matched_node @> jsonb_build_array(:node_name)
           AND article_timestamp IS NOT NULL
           AND risk_score IS NOT NULL
           AND article_timestamp::date >= :h_min
@@ -262,34 +342,46 @@ def compute_accuracy_metrics(
 
 
 def ensure_snapshot_for_node(
-    session: Session, node_name: str, forecast_date: date, source: str
+    session: Session, node_name: str, forecast_date: date, source: str, method: str = METHOD_XGBOOST
 ) -> Tuple[List[dict], bool]:
     """
     Return snapshot rows and whether they were generated on this call (persist attempted).
     """
-    if snapshot_exists(session, node_name, forecast_date):
-        rows = load_snapshot_rows(session, node_name, forecast_date)
+    if snapshot_exists(session, node_name, forecast_date, method=method):
+        rows = load_snapshot_rows(session, node_name, forecast_date, method=method)
         return rows, False
-    rows = generate_prophet_horizon_14(session, node_name, forecast_date)
-    persist_snapshot_rows(session, node_name, forecast_date, rows, source=source)
+ 
+    if method == METHOD_XGBOOST:
+        rows = generate_xgboost_horizon_14(session, node_name, forecast_date)
+    else:
+        rows = generate_prophet_horizon_14(session, node_name, forecast_date)
+ 
+    persist_snapshot_rows(session, node_name, forecast_date, rows, source=source, method=method)
     session.commit()
-    rows = load_snapshot_rows(session, node_name, forecast_date)
+    rows = load_snapshot_rows(session, node_name, forecast_date, method=method)
     return rows, True
-
-
-def snapshot_all_nodes_for_date(session: Session, forecast_date: date, source: str = SOURCE_SCHEDULED) -> dict:
+ 
+ 
+def snapshot_all_nodes_for_date(
+    session: Session, forecast_date: date, source: str = SOURCE_SCHEDULED, method: str = METHOD_XGBOOST
+) -> dict:
     nodes = session.execute(text("SELECT node_name FROM suppliers ORDER BY node_name")).fetchall()
     ok, failed = 0, []
     for (node_name,) in nodes:
         try:
-            if snapshot_exists(session, node_name, forecast_date):
+            if snapshot_exists(session, node_name, forecast_date, method=method):
                 ok += 1
                 continue
-            rows = generate_prophet_horizon_14(session, node_name, forecast_date)
-            persist_snapshot_rows(session, node_name, forecast_date, rows, source=source)
+ 
+            if method == METHOD_XGBOOST:
+                rows = generate_xgboost_horizon_14(session, node_name, forecast_date)
+            else:
+                rows = generate_prophet_horizon_14(session, node_name, forecast_date)
+ 
+            persist_snapshot_rows(session, node_name, forecast_date, rows, source=source, method=method)
             ok += 1
         except Exception as e:
-            logger.warning("Snapshot skip %s @ %s: %s", node_name, forecast_date, e)
+            logger.warning("Snapshot skip %s @ %s (%s): %s", node_name, forecast_date, method, e)
             failed.append({"node_name": node_name, "error": str(e)})
     session.commit()
-    return {"forecast_date": str(forecast_date), "saved": ok, "failed": failed}
+    return {"forecast_date": str(forecast_date), "method": method, "saved": ok, "failed": failed}

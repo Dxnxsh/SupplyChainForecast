@@ -124,26 +124,27 @@ export const api = {
     fetchJson<BackendEvent[]>(
       `/events/forecasted/by_node/${encodeURIComponent(nodeName)}?limit=${clampLimit(limit)}${asOfParam(asOf)}`
     ),
-  getSupplierForecast: (nodeName: string) =>
+  getSupplierForecast: (nodeName: string, asOf?: string | null) =>
     fetchJson<BackendHybridForecastPoint[]>(
-      `/suppliers/${encodeURIComponent(nodeName)}/hybrid_forecast`
+      `/suppliers/${encodeURIComponent(nodeName)}/forecast${asOfParam(asOf)}`
     ),
   getSummary: (asOf?: string | null) =>
     fetchJson<BackendSummary>(`/summary${asOf && asOf.length > 0 ? `?as_of=${encodeURIComponent(asOf)}` : ''}`),
-  getForecastSnapshotDates: (nodeName?: string | null) => {
+  getForecastSnapshotDates: (nodeName?: string | null, method = 'xgboost') => {
     const q =
       nodeName && nodeName.length > 0
-        ? `?node_name=${encodeURIComponent(nodeName)}`
-        : '';
+        ? `?node_name=${encodeURIComponent(nodeName)}&method=${method}`
+        : `?method=${method}`;
     return fetchJson<{ dates: string[] }>(`/forecast-snapshots/dates${q}`);
   },
   getForecastSnapshot: (
     nodeName: string,
     snapshotDate: string,
-    includeActuals = true
+    includeActuals = true,
+    method = 'xgboost'
   ) =>
     fetchJson<ForecastSnapshotResponse>(
-      `/suppliers/${encodeURIComponent(nodeName)}/forecast_snapshot?date=${encodeURIComponent(snapshotDate)}&include_actuals=${includeActuals}`
+      `/suppliers/${encodeURIComponent(nodeName)}/forecast_snapshot?date=${encodeURIComponent(snapshotDate)}&include_actuals=${includeActuals}&method=${method}`
     ),
   triggerRssIngest: async () => {
     const response = await fetch(`${API_BASE_URL}/admin/rss-ingest/trigger`, {

@@ -788,7 +788,7 @@ def get_dashboard_summary(
         logger.error(f"Error fetching summary data: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Could not fetch summary: {e}")
 
-@app.get("/suppliers/{node_name}/forecast", response_model=List[ForecastPoint], tags=["Forecasting"])
+@app.get("/suppliers/{node_name}/forecast", response_model=List[HybridForecastPoint], tags=["Forecasting"])
 def get_risk_forecast(
     node_name: str, 
     as_of: Optional[date] = Depends(_parse_as_of_optional),
@@ -823,34 +823,34 @@ def get_risk_forecast(
         df = pd.DataFrame({'ds': full_range})
         df = df.merge(raw_df, on='ds', how='left').fillna(0)
         
-        # 2. Load the XGBoost model
-        model_path = "models/forecast_xgboost.json"
+        # 2. Load the XGBoost model (News-Enriched)
+        model_path = "models/forecast_xgboost_news.json"
         if not os.path.exists(model_path):
-            raise HTTPException(status_code=500, detail="Forecast model not found. Please train the model first.")
-        
+            model_path = "models/forecast_xgboost.json" # Fallback
+            
         model = xgb.XGBRegressor()
         model.load_model(model_path)
         
-        # 3. Recursive Prediction
+        # 3. Load News Projections
+        from src.predictive_forecasting import load_temporal_enriched_events, create_future_risk_projections, get_news_risk_for_date
+        events = load_temporal_enriched_events()
+        news_projections = create_future_risk_projections(events, forecast_days=30)
+        
+        # 4. Recursive Prediction
         forecast_points = []
         current_df = df.copy()
         
         for i in range(1, 15):
-            # Prepare features for the next day
-            # Features: risk_lag_1-7, rolling_avg_7, rolling_avg_14, event_count_7
-            last_row = current_df.iloc[-1]
+            next_date = target_date + timedelta(days=i)
+            news_risk = get_news_risk_for_date(news_projections, node_name, next_date)
             
             features = {
                 'risk_lag_1': current_df['y'].iloc[-1],
-                'risk_lag_2': current_df['y'].iloc[-2] if len(current_df) > 1 else 0,
-                'risk_lag_3': current_df['y'].iloc[-3] if len(current_df) > 2 else 0,
-                'risk_lag_4': current_df['y'].iloc[-4] if len(current_df) > 3 else 0,
-                'risk_lag_5': current_df['y'].iloc[-5] if len(current_df) > 4 else 0,
-                'risk_lag_6': current_df['y'].iloc[-6] if len(current_df) > 5 else 0,
-                'risk_lag_7': current_df['y'].iloc[-7] if len(current_df) > 6 else 0,
+                'risk_lag_2': current_df['y'].iloc[-2],
+                'risk_lag_3': current_df['y'].iloc[-3],
+                'risk_lag_7': current_df['y'].iloc[-7],
                 'rolling_avg_7': current_df['y'].tail(7).mean(),
-                'rolling_avg_14': current_df['y'].tail(14).mean(),
-                'event_count_7': current_df['event_count'].tail(7).sum()
+                'news_risk': news_risk
             }
             
             X = pd.DataFrame([features])
@@ -861,19 +861,27 @@ def get_risk_forecast(
             forecast_points.append({
                 "ds": next_date,
                 "yhat": round(yhat, 2),
-                "yhat_lower": round(yhat * 0.8, 2), # Simple heuristic for intervals
-                "yhat_upper": round(yhat * 1.2, 2)
+                "yhat_lower": round(yhat * 0.7, 2),
+                "yhat_upper": round(yhat * 1.3, 2),
+                "news_contribution": round(news_risk, 2),
+                "historical_contribution": round(yhat - news_risk if yhat > news_risk else 0, 2)
             })
             
             # Update current_df for next recursion
             new_row = pd.DataFrame({
                 'ds': [pd.Timestamp(next_date)],
                 'y': [yhat],
-                'event_count': [0] # Assume no new events in the future for risk decay
+                'event_count': [0]
             })
             current_df = pd.concat([current_df, new_row], ignore_index=True)
 
-        return forecast_points
+        return [
+            {
+                **p,
+                "method": "xgboost-news"
+            }
+            for p in forecast_points
+        ]
         
     except HTTPException as e:
         raise e
@@ -882,55 +890,43 @@ def get_risk_forecast(
         raise HTTPException(status_code=500, detail=f"Could not generate forecast: {e}")
 
 @app.get("/suppliers/{node_name}/hybrid_forecast", response_model=List[HybridForecastPoint], tags=["Forecasting"])
-def get_hybrid_forecast(node_name: str):
+def get_hybrid_forecast(
+    node_name: str, 
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
+    db: Session = Depends(get_db)
+):
     """
-    Generates a 14-day HYBRID forecast that combines:
-    1. Historical trends (Prophet time-series)
-    2. Forward-looking predictions from news about upcoming events (hurricanes, strikes, etc.)
-    
-    This endpoint reads from pre-generated forecast files created by predictive_forecasting.py
+    Legacy endpoint redirected to use the new XGBoost forecast logic.
     """
     try:
-        # Try to load pre-generated forecast
-        forecast_file = f"data/forecasts/{node_name.replace(' ', '_')}_forecast.json"
-        
-        if not os.path.exists(forecast_file):
-            logger.warning(f"No hybrid forecast file found for '{node_name}' at {forecast_file}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"No hybrid forecast available for '{node_name}'. Run predictive_forecasting.py to generate forecasts."
-            )
-        
-        with open(forecast_file, 'r') as f:
-            forecast_data = json.load(f)
-        
-        # Validate and return
-        if not forecast_data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Forecast file is empty for '{node_name}'."
-            )
-        
-        return forecast_data
-        
-    except HTTPException as e:
-        raise e
+        points = get_risk_forecast(node_name, as_of, db)
+        # Add dummy news/historical breakdown for UI compatibility
+        return [
+            {
+                **p,
+                "news_contribution": 0.0,
+                "historical_contribution": p["yhat"],
+                "method": "xgboost-recursive"
+            }
+            for p in points
+        ]
     except Exception as e:
-        logger.error(f"❌ Error loading hybrid forecast for '{node_name}': {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Could not load hybrid forecast: {e}")
+        logger.error(f"❌ Error in hybrid forecast redirect: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/forecast-snapshots/dates", tags=["Forecasting"])
 @app.get("/api/forecast-snapshots/dates", tags=["Forecasting"], include_in_schema=False)
 def get_forecast_snapshot_dates(
     node_name: Optional[str] = Query(None, description="Limit to dates that exist for this node"),
+    method: str = Query("xgboost", description="Forecast method (xgboost or prophet)"),
     db: Session = Depends(get_db),
 ):
     """Distinct forecast_date values stored (newest first)."""
     from src.forecast_snapshots import list_snapshot_dates
 
     try:
-        dates = list_snapshot_dates(db, node_name)
+        dates = list_snapshot_dates(db, node_name, method=method)
         return {"dates": [d.isoformat() for d in dates]}
     except Exception as e:
         logger.error("Error listing forecast snapshot dates: %s", e, exc_info=True)
@@ -952,6 +948,7 @@ def get_forecast_snapshot(
     node_name: str,
     snapshot_date: date = Query(..., alias="date", description="Forecast origin date (YYYY-MM-DD)"),
     include_actuals: bool = Query(True, description="Include realized daily sum(risk_score) per horizon day"),
+    method: str = Query("xgboost", description="Forecast method (xgboost or prophet)"),
     db: Session = Depends(get_db),
 ):
     """
@@ -976,7 +973,7 @@ def get_forecast_snapshot(
         if not row:
             raise HTTPException(status_code=404, detail=f"Unknown supplier node: {node_name}")
 
-        rows, generated = ensure_snapshot_for_node(db, node_name, snapshot_date, SOURCE_ON_DEMAND)
+        rows, generated = ensure_snapshot_for_node(db, node_name, snapshot_date, SOURCE_ON_DEMAND, method=method)
         if len(rows) < 14:
             raise HTTPException(
                 status_code=404,
@@ -1029,7 +1026,7 @@ def get_forecast_snapshot(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-def _run_snapshot_job_sync(forecast_date: date) -> None:
+def _run_snapshot_job_sync(forecast_date: date, method: str = "xgboost") -> None:
     if SessionLocal is None:
         logger.error("SessionLocal not configured; skip snapshot job")
         return
@@ -1037,7 +1034,7 @@ def _run_snapshot_job_sync(forecast_date: date) -> None:
 
     s = SessionLocal()
     try:
-        snapshot_all_nodes_for_date(s, forecast_date, SOURCE_SCHEDULED)
+        snapshot_all_nodes_for_date(s, forecast_date, SOURCE_SCHEDULED, method=method)
     except Exception as e:
         logger.error("Background forecast snapshot job failed: %s", e, exc_info=True)
     finally:
@@ -1049,15 +1046,16 @@ def admin_run_forecast_snapshots(
     background_tasks: BackgroundTasks,
     forecast_date: Optional[date] = Query(
         None,
-        description="Defaults to today (UTC). Generates Prophet snapshots for all suppliers.",
+        description="Defaults to today (UTC). Generates snapshots for all suppliers.",
     ),
+    method: str = Query("xgboost", description="Forecast method (xgboost or prophet)"),
 ):
     """Queue daily snapshot generation for all supplier nodes (non-blocking)."""
     from src.forecast_snapshots import utc_today
-
+ 
     fd = forecast_date or utc_today()
-    background_tasks.add_task(_run_snapshot_job_sync, fd)
-    return {"status": "queued", "forecast_date": fd.isoformat()}
+    background_tasks.add_task(_run_snapshot_job_sync, fd, method)
+    return {"status": "queued", "forecast_date": fd.isoformat(), "method": method}
 
 
 @app.get("/events/forecasted", response_model=List[Event], tags=["Events"])

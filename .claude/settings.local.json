@@ -1,1 +1,8 @@
-{}
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv311/bin/python *)",
+      "Skill(browse)"
+    ]
+  }
+}

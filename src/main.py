@@ -830,7 +830,7 @@ def get_risk_forecast(
             # Legacy Recursive XGBoost Fallback
             # 1. Fetch historical risk data for the node up to as_of
             query = text("""
-                SELECT article_timestamp::date as ds, SUM(risk_score) as y, COUNT(*) as event_count
+                SELECT article_timestamp::date as ds, AVG(risk_score) as y, COUNT(*) as event_count
                 FROM events
                 WHERE matched_node @> jsonb_build_array(:node_name) 
                   AND article_timestamp IS NOT NULL 

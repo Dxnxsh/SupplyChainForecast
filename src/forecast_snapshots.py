@@ -1,5 +1,5 @@
 # src/forecast_snapshots.py
-"""Daily Prophet forecast snapshots per supplier node (persisted + on-demand fill)."""
+"""Daily forecast snapshots per supplier node (persisted + on-demand fill)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, List, Optional, Sequence, Tuple
 
 import pandas as pd
-from prophet import Prophet
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
@@ -17,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 METHOD_PROPHET = "prophet"
 METHOD_XGBOOST = "xgboost"
+METHOD_XGBOOST_Q75 = "xgboost_q75"
+METHOD_XGBOOST_MEAN = "xgboost_mean"
 SOURCE_SCHEDULED = "scheduled"
 SOURCE_ON_DEMAND = "on_demand"
 
@@ -47,171 +48,231 @@ def utc_today() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def generate_prophet_horizon_14(session: Session, node_name: str, forecast_date: date) -> List[dict]:
+
+
+def generate_xgboost_horizon_14(session: Session, node_name: str, forecast_date: date, severity_variant: str = "q75") -> List[dict]:
     """
-    Train Prophet on daily SUM(risk_score) through forecast_date (inclusive), predict horizon_days=14
-    starting forecast_date + 1. Matches get_risk_forecast hyperparameters.
+    Two-Stage XGBoost forecast (freeze-window architecture).
+    Stage 1: P(event) via XGBClassifier
+    Stage 2: E[risk | event] via XGBRegressor
+    Final: yhat = P(event) * severity
+    No recursive predictions — all features computed from actual data at forecast_date.
+
+    severity_variant: "mean" (default, reg:squarederror) or "q75" (reg:quantileerror at 0.75)
     """
-    q = text(
-        """
-        SELECT article_timestamp::date AS ds, SUM(risk_score) AS y
+    import json
+    import os
+    import numpy as np
+    import xgboost as xgb
+
+    clf_path = "models/forecast_event_prob.json"
+    if severity_variant == "q75":
+        reg_path = "models/forecast_severity_q75.json"
+        intervals_path = "models/forecast_intervals_q75.json"
+    else:
+        reg_path = "models/forecast_severity.json"
+        intervals_path = "models/forecast_intervals.json"
+
+    if not os.path.exists(clf_path) or not os.path.exists(reg_path):
+        raise FileNotFoundError(
+            f"Two-stage model files not found. Run scripts/train_two_stage_forecast.py first. "
+            f"Missing: {[p for p in [clf_path, reg_path] if not os.path.exists(p)]}"
+        )
+
+    clf = xgb.XGBClassifier()
+    clf.load_model(clf_path)
+    reg = xgb.XGBRegressor()
+    reg.load_model(reg_path)
+
+    intervals = {}
+    if os.path.exists(intervals_path):
+        with open(intervals_path) as f:
+            intervals = json.load(f)
+    error_p80 = intervals.get(node_name, intervals.get("__global__", 15.0))
+
+    # Fetch event history for this node up to forecast_date
+    q_events = text("""
+        SELECT
+            article_timestamp::date AS ds,
+            risk_score,
+            sentiment_score,
+            sentiment_label,
+            potential_event_types
         FROM events
         WHERE matched_node @> jsonb_build_array(:node_name)
           AND article_timestamp IS NOT NULL
           AND risk_score IS NOT NULL
           AND article_timestamp::date <= :forecast_date
+    """)
+    rows = session.execute(q_events, {"node_name": node_name, "forecast_date": forecast_date}).fetchall()
+    event_df = pd.DataFrame(rows, columns=["ds", "risk_score", "sentiment_score", "sentiment_label", "potential_event_types"])
+    event_df["ds"] = pd.to_datetime(event_df["ds"])
+
+    # Fetch news signal for horizon days
+    q_news = text("""
+        SELECT
+            (temporal_info->>'predicted_date')::date AS predicted_date,
+            risk_score * COALESCE((temporal_info->>'confidence')::float, 0.5) AS weighted_risk
+        FROM events
+        WHERE matched_node @> jsonb_build_array(:node_name)
+          AND temporal_info IS NOT NULL
+          AND temporal_info->>'predicted_date' IS NOT NULL
+          AND risk_score IS NOT NULL
+    """)
+    news_rows = session.execute(q_news, {"node_name": node_name}).fetchall()
+    news_df = pd.DataFrame(news_rows, columns=["predicted_date", "weighted_risk"])
+    news_signal_map = {}
+    if not news_df.empty:
+        news_df["predicted_date"] = pd.to_datetime(news_df["predicted_date"])
+        for dt, grp in news_df.groupby("predicted_date"):
+            news_signal_map[dt] = float(grp["weighted_risk"].sum())
+
+    # Global event count (all nodes)
+    q_global = text("""
+        SELECT article_timestamp::date AS ds, COUNT(*) AS event_count
+        FROM events
+        WHERE article_timestamp IS NOT NULL AND risk_score IS NOT NULL
+          AND article_timestamp::date >= :start AND article_timestamp::date <= :end
         GROUP BY ds
-        ORDER BY ds;
-        """
-    )
-    result = session.execute(
-        q, {"node_name": node_name, "forecast_date": forecast_date}
-    ).fetchall()
-    if len(result) < 2:
-        raise ValueError(
-            f"Not enough historical data for '{node_name}' as of {forecast_date} "
-            f"(need at least 2 days with risk_score)."
-        )
+    """)
+    global_start = forecast_date - timedelta(days=3)
+    global_rows = session.execute(q_global, {"start": global_start, "end": forecast_date}).fetchall()
+    global_3d_count = sum(r[1] for r in global_rows)
 
-    raw_df = pd.DataFrame(result, columns=["ds", "y"])
-    raw_df["ds"] = pd.to_datetime(raw_df["ds"])
-    raw_df["y"] = pd.to_numeric(raw_df["y"])
+    # Build daily aggregate for this node
+    obs_date = pd.Timestamp(forecast_date)
+    window_3d_start = obs_date - pd.Timedelta(days=3)
+    window_7d_start = obs_date - pd.Timedelta(days=7)
+    window_14d_start = obs_date - pd.Timedelta(days=14)
 
-    start = raw_df["ds"].min()
-    end = pd.Timestamp(forecast_date)
-    full_range = pd.date_range(start=start, end=end, freq="D")
-    df = pd.DataFrame({"ds": full_range, "y": 0.0})
-    df = df.merge(raw_df.rename(columns={"y": "y_actual"}), on="ds", how="left")
-    df["y"] = df["y_actual"].fillna(df["y"])
-    df = df[["ds", "y"]]
+    hist = event_df[event_df["ds"] < obs_date]
+    hist_3d = hist[hist["ds"] >= window_3d_start]
+    hist_7d = hist[hist["ds"] >= window_7d_start]
+    hist_14d = hist[hist["ds"] >= window_14d_start]
 
-    model = Prophet(
-        daily_seasonality=False,
-        weekly_seasonality=True,
-        yearly_seasonality=True,
-        changepoint_prior_scale=0.05,
-    )
-    model.fit(df)
+    # Compute frozen features
+    frozen = {}
 
-    future = model.make_future_dataframe(periods=14)
-    forecast = model.predict(future)
-    mask = forecast["ds"].dt.date > forecast_date
-    pred = forecast.loc[mask, ["ds", "yhat", "yhat_lower", "yhat_upper"]].head(14).copy()
-    if len(pred) < 14:
-        raise ValueError(f"Prophet returned fewer than 14 future rows for '{node_name}'.")
+    # Short-term
+    daily_7d = hist_7d.groupby("ds").agg(cnt=("risk_score", "count"), avg_r=("risk_score", "mean"), max_r=("risk_score", "max")).reset_index()
+    daily_3d = hist_3d.groupby("ds").agg(cnt=("risk_score", "count")).reset_index()
 
-    pred["yhat"] = pred["yhat"].clip(lower=0)
-    pred["yhat_lower"] = pred["yhat_lower"].clip(lower=0)
-    pred["yhat_upper"] = pred["yhat_upper"].clip(lower=0)
-    pred["ds"] = pred["ds"].dt.date
+    frozen["event_count_3d"] = int(daily_3d["cnt"].sum()) if len(daily_3d) > 0 else 0
+    frozen["event_count_7d"] = int(daily_7d["cnt"].sum()) if len(daily_7d) > 0 else 0
+    event_days_7d = len(daily_7d[daily_7d["cnt"] > 0])
+    frozen["event_freq_7d"] = event_days_7d / 7.0
+    frozen["avg_risk_last_7d_events"] = float(daily_7d[daily_7d["cnt"] > 0]["avg_r"].mean()) if event_days_7d > 0 else 0.0
+    frozen["max_risk_last_7d"] = float(daily_7d["max_r"].max()) if len(daily_7d) > 0 else 0.0
+    frozen["event_any_last_7d"] = 1 if event_days_7d > 0 else 0
 
-    return pred.to_dict("records")
- 
- 
-def generate_xgboost_horizon_14(session: Session, node_name: str, forecast_date: date) -> List[dict]:
-    """
-    Generate 14-day forecast using the new Event-Driven Decomposed Signal Fusion (EDSF) model under the hood.
-    Gracefully falls back to the legacy recursive XGBoost if Prophet/EDSF fails.
-    """
-    try:
-        from src.predictive_forecasting import generate_edsf_forecast
-        
-        forecast_df = generate_edsf_forecast(
-            node_name=node_name,
-            forecast_days=14,
-            session=session,
-            target_date=forecast_date
-        )
-        points = forecast_df.to_dict('records')
-        
-        return [
-            {
-                "ds": p["ds"],
-                "yhat": p["yhat"],
-                "yhat_lower": p["yhat_lower"],
-                "yhat_upper": p["yhat_upper"]
-            }
-            for p in points
-        ]
-    except Exception as edsf_err:
-        logger.warning(f"⚠️ generate_xgboost_horizon_14 with EDSF failed, falling back to recursive XGBoost: {edsf_err}", exc_info=True)
-        
-        import xgboost as xgb
-        import os
-     
-        q = text(
-            """
-            SELECT article_timestamp::date AS ds, SUM(risk_score) AS y, COUNT(*) as event_count
-            FROM events
-            WHERE matched_node @> jsonb_build_array(:node_name)
-              AND article_timestamp IS NOT NULL
-              AND risk_score IS NOT NULL
-              AND article_timestamp::date <= :forecast_date
-            GROUP BY ds
-            ORDER BY ds;
-            """
-        )
-        result = session.execute(
-            q, {"node_name": node_name, "forecast_date": forecast_date}
-        ).fetchall()
-     
-        raw_df = pd.DataFrame(result, columns=["ds", "y", "event_count"])
-        raw_df["ds"] = pd.to_datetime(raw_df["ds"])
-     
-        # Create 30-day window to seed lags
-        start_date = forecast_date - timedelta(days=30)
-        full_range = pd.date_range(start=start_date, end=forecast_date, freq="D")
-        df = pd.DataFrame({"ds": full_range})
-        df = df.merge(raw_df, on="ds", how="left").fillna(0)
-     
-        model_path = "models/forecast_xgboost_news.json"
-        if not os.path.exists(model_path):
-            model_path = "models/forecast_xgboost.json" # Fallback
-     
-        model = xgb.XGBRegressor()
-        model.load_model(model_path)
-        
-        # Load News Projections
-        from src.predictive_forecasting import load_temporal_enriched_events, create_future_risk_projections, get_news_risk_for_date
-        events = load_temporal_enriched_events()
-        news_projections = create_future_risk_projections(events, forecast_days=30)
-     
-        forecast_points = []
-        current_df = df.copy()
-     
-        for i in range(1, 15):
-            next_date = forecast_date + timedelta(days=i)
-            news_risk = get_news_risk_for_date(news_projections, node_name, next_date)
-            
-            features = {
-                "risk_lag_1": current_df["y"].iloc[-1],
-                "risk_lag_2": current_df["y"].iloc[-2],
-                "risk_lag_3": current_df["y"].iloc[-3],
-                "risk_lag_7": current_df["y"].iloc[-7],
-                "rolling_avg_7": current_df["y"].tail(7).mean(),
-                "news_risk": news_risk
-            }
-            X = pd.DataFrame([features])
-            yhat = max(0, float(model.predict(X)[0]))
-     
-            margin = 35.0 + 5.0 * i + 0.4 * yhat
-            yhat_lower = max(0.0, yhat - margin)
-            yhat_upper = yhat + margin
-    
-            forecast_points.append(
-                {
-                    "ds": next_date,
-                    "yhat": round(yhat, 2),
-                    "yhat_lower": round(yhat_lower, 2),
-                    "yhat_upper": round(yhat_upper, 2),
-                }
-            )
-            new_row = pd.DataFrame(
-                {"ds": [pd.Timestamp(next_date)], "y": [yhat], "event_count": [0]}
-            )
-            current_df = pd.concat([current_df, new_row], ignore_index=True)
-     
-        return forecast_points
+    # Medium-term (14d)
+    daily_14d = hist_14d.groupby("ds").agg(cnt=("risk_score", "count"), avg_r=("risk_score", "mean")).reset_index()
+    frozen["event_count_14d"] = int(daily_14d["cnt"].sum()) if len(daily_14d) > 0 else 0
+    frozen["article_count_14d_total"] = frozen["event_count_14d"]
+    avg_daily = frozen["article_count_14d_total"] / 14.0
+    frozen["article_spike_days_14d"] = int((daily_14d["cnt"] > avg_daily).sum()) if len(daily_14d) > 0 else 0
+
+    # Sentiment (14d)
+    sent_14d = hist_14d[hist_14d["sentiment_score"].notna()]
+    if len(sent_14d) > 0:
+        daily_sent = sent_14d.groupby("ds")["sentiment_score"].mean()
+        frozen["sentiment_14d_mean"] = float(daily_sent.mean())
+        frozen["sentiment_14d_std"] = float(daily_sent.std()) if len(daily_sent) > 1 else 0.0
+        frozen["sentiment_14d_min"] = float(daily_sent.min())
+        last3_dates = daily_sent.sort_index().tail(3)
+        first3_dates = daily_sent.sort_index().head(3)
+        frozen["sentiment_delta_14d"] = float(last3_dates.mean() - first3_dates.mean())
+        neg_count = len(sent_14d[sent_14d["sentiment_label"] == "negative"])
+        frozen["negative_ratio_14d"] = neg_count / max(len(sent_14d), 1)
+        mid = daily_sent[(daily_sent.index >= obs_date - pd.Timedelta(days=10)) & (daily_sent.index < obs_date - pd.Timedelta(days=7))]
+        frozen["sentiment_lag_7d"] = float(mid.mean()) if len(mid) > 0 else frozen["sentiment_14d_mean"]
+        far = daily_sent[daily_sent.index < obs_date - pd.Timedelta(days=11)]
+        frozen["sentiment_lag_14d"] = float(far.mean()) if len(far) > 0 else frozen["sentiment_14d_mean"]
+    else:
+        for k in ["sentiment_14d_mean", "sentiment_14d_std", "sentiment_14d_min",
+                  "sentiment_delta_14d", "negative_ratio_14d", "sentiment_lag_7d", "sentiment_lag_14d"]:
+            frozen[k] = 0.0
+
+    # Event types (14d)
+    type_counts = {"Political_Regulatory": 0, "Labor_Issue": 0, "Logistics_Issue": 0, "Natural_Disaster": 0}
+    unique_types = set()
+    for val in hist_14d["potential_event_types"]:
+        types_list = []
+        if isinstance(val, list):
+            types_list = val
+        elif isinstance(val, str):
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list):
+                    types_list = parsed
+            except (json.JSONDecodeError, TypeError):
+                pass
+        for t in types_list:
+            unique_types.add(t)
+            if t in type_counts:
+                type_counts[t] += 1
+    frozen["event_geopolitical_count"] = type_counts["Political_Regulatory"]
+    frozen["event_labor_count"] = type_counts["Labor_Issue"]
+    frozen["event_logistics_count"] = type_counts["Logistics_Issue"]
+    frozen["event_weather_count"] = type_counts["Natural_Disaster"]
+    frozen["unique_event_types"] = len(unique_types)
+
+    # Cross-node
+    frozen["global_event_count_3d"] = global_3d_count
+    total_days = max((event_df["ds"].max() - event_df["ds"].min()).days + 1, 1) if len(event_df) > 0 else 1
+    event_days_total = event_df["ds"].nunique()
+    frozen["node_event_rate"] = event_days_total / total_days
+
+    # Trends
+    if len(daily_7d) >= 2:
+        y_vals = daily_7d["avg_r"].fillna(0).values
+        x_vals = np.arange(len(y_vals))
+        frozen["risk_trend_7d"] = float(np.polyfit(x_vals, y_vals, 1)[0])
+    else:
+        frozen["risk_trend_7d"] = 0.0
+
+    daily_8_14 = hist_14d[hist_14d["ds"] < window_7d_start].groupby("ds").agg(cnt=("risk_score", "count")).reset_index()
+    freq_8_14 = len(daily_8_14[daily_8_14["cnt"] > 0]) / 7.0 if len(daily_8_14) > 0 else 0.0
+    frozen["event_freq_acceleration"] = frozen["event_freq_7d"] - freq_8_14
+
+    # days_since_last_event base
+    if len(hist) > 0:
+        last_event_date = hist["ds"].max()
+        base_days_since = (obs_date - last_event_date).days
+    else:
+        base_days_since = 30
+
+    # Predict 14 horizon days
+    from scripts.train_two_stage_forecast import FEATURE_COLUMNS
+
+    forecast_points = []
+    for i in range(1, 15):
+        target = forecast_date + timedelta(days=i)
+        target_ts = pd.Timestamp(target)
+
+        features = dict(frozen)
+        features["day_offset"] = i
+        features["day_of_week"] = target_ts.weekday()
+        features["is_weekend"] = 1 if target_ts.weekday() >= 5 else 0
+        features["days_since_last_event"] = base_days_since + i
+        features["news_signal"] = news_signal_map.get(target_ts, 0.0)
+
+        X = pd.DataFrame([{col: features.get(col, 0.0) for col in FEATURE_COLUMNS}])
+        p_event = float(clf.predict_proba(X)[:, 1][0])
+        severity = max(0.0, float(reg.predict(X)[0]))
+        yhat = p_event * severity
+
+        yhat_lower = max(0.0, yhat - error_p80)
+        yhat_upper = yhat + error_p80
+
+        forecast_points.append({
+            "ds": target,
+            "yhat": round(yhat, 2),
+            "yhat_lower": round(yhat_lower, 2),
+            "yhat_upper": round(yhat_upper, 2),
+        })
+
+    return forecast_points
 
 
 def persist_snapshot_rows(
@@ -323,7 +384,7 @@ def fetch_actuals_for_horizon(
     h_max = max(horizon_days)
     q = text(
         """
-        SELECT article_timestamp::date AS ds, COALESCE(SUM(risk_score), 0)::double precision AS y
+        SELECT article_timestamp::date AS ds, COALESCE(AVG(risk_score), 0)::double precision AS y
         FROM events
         WHERE matched_node @> jsonb_build_array(:node_name)
           AND article_timestamp IS NOT NULL
@@ -379,11 +440,11 @@ def ensure_snapshot_for_node(
         rows = load_snapshot_rows(session, node_name, forecast_date, method=method)
         return rows, False
  
-    if method == METHOD_XGBOOST:
-        rows = generate_xgboost_horizon_14(session, node_name, forecast_date)
+    if method == METHOD_XGBOOST_MEAN:
+        rows = generate_xgboost_horizon_14(session, node_name, forecast_date, severity_variant="mean")
     else:
-        rows = generate_prophet_horizon_14(session, node_name, forecast_date)
- 
+        rows = generate_xgboost_horizon_14(session, node_name, forecast_date, severity_variant="q75")
+
     persist_snapshot_rows(session, node_name, forecast_date, rows, source=source, method=method)
     session.commit()
     rows = load_snapshot_rows(session, node_name, forecast_date, method=method)
@@ -401,10 +462,10 @@ def snapshot_all_nodes_for_date(
                 ok += 1
                 continue
  
-            if method == METHOD_XGBOOST:
-                rows = generate_xgboost_horizon_14(session, node_name, forecast_date)
+            if method == METHOD_XGBOOST_MEAN:
+                rows = generate_xgboost_horizon_14(session, node_name, forecast_date, severity_variant="mean")
             else:
-                rows = generate_prophet_horizon_14(session, node_name, forecast_date)
+                rows = generate_xgboost_horizon_14(session, node_name, forecast_date, severity_variant="q75")
  
             persist_snapshot_rows(session, node_name, forecast_date, rows, source=source, method=method)
             ok += 1

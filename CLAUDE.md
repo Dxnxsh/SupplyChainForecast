@@ -4,18 +4,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Supply chain disruption monitoring and forecasting: articles become structured events (NLP, geocoding, node matching, temporal hints), scored for risk, rolled up per supplier node, and combined with Prophet-style hybrid forecasts. **PostgreSQL** is the system of record. **FastAPI** (`src/main.py`) serves the API. **Live news** enters through **RSS ingestion** (`src/rss_ingest.py`). The **Vite + React** app in `chain-calm-main/` is the operator dashboard.
+Supply chain disruption monitoring and forecasting: articles become structured events (NLP, geocoding, node matching, temporal hints), scored for risk, rolled up per supplier node, and forecasted via **Two-Stage XGBoost** (snapshots/rewind) and **EDSF** (live). **PostgreSQL** is the system of record. **FastAPI** (`src/main.py`) serves the API. **Live news** enters through **RSS ingestion** (`src/rss_ingest.py`). The **Vite + React** app in `chain-calm-main/` is the operator dashboard.
 
 **ML stack (production paths):**
 
 - **Headline tri-class risk** (LOW / MEDIUM / HIGH): TF-IDF + **XGBoost** (`model_training/classifier.pkl` as a **3-tuple**: vectorizer, model, `LabelEncoder`). Used in preprocessing (batch), RSS, and `json_ingest`.
 - **Batch heuristic risk** (`risk_score`, relevance/severity): rule features + **FinBERT** sentiment by default (`src/sentiment_finbert.py`, `src/risk_scoring.py`); set `USE_FINBERT_RISK=0` for VADER.
 - **Disruption + impact** (optional pickles): TF-IDF + categoricals + **XGBoost** classifier + **XGBoost** regressor (`disruption_classifier.pkl`, `impact_regressor_v2.pkl`). Same inference on **RSS** and **batch** via `apply_batch_disruption_and_impact`.
-- **Risk Forecasting**: Recursive Autoregressive (AR) model using **XGBoost** (`models/forecast_xgboost.json`). Replaces Prophet for daily risk score predictions.
+- **Risk Forecasting (Snapshots)**: **Two-Stage XGBoost** (`src/forecast_snapshots.py`) is the production snapshot engine. Stage 1 (`models/forecast_event_prob.json`, XGBClassifier) predicts P(event); Stage 2 (`models/forecast_severity_q75.json`, XGBRegressor with quantile q=0.75) predicts E[risk | event]. Final: `yhat = P(event) * severity`. Uses **freeze-window** architecture (no recursive predictions — all features computed from actual data at forecast_date, `day_offset` differentiates horizon days). Method keys: `xgboost` (default, q75), `xgboost_mean` (mean regression variant for comparison). Trained via `scripts/train_two_stage_forecast.py`.
+- **Risk Forecasting (Live)**: **EDSF** (`src/predictive_forecasting.generate_edsf_forecast`) serves the live `/forecast` endpoint — calibrated Prophet baseline fused with gated news boost. Falls back to recursive XGBoost. RSS pipeline also calls `generate_all_node_forecasts` (EDSF path). The live path does NOT use the two-stage model.
 
 Two ways data gets into the database:
 
-1. **Batch pipeline** — `run_predictive_pipeline.py`: raw JSON under `data/raw/web_scrape/` → filter → **FinBERT/VADER risk scoring** → geocode → match → optional temporal → **`apply_batch_disruption_and_impact`** (XGB disruption/impact) → optional Prophet → `load_to_db.populate_database`.
+1. **Batch pipeline** — `run_predictive_pipeline.py`: raw JSON under `data/raw/web_scrape/` → filter → **FinBERT/VADER risk scoring** → geocode → match → optional temporal → **`apply_batch_disruption_and_impact`** (XGB disruption/impact) → optional EDSF/Prophet forecast → `load_to_db.populate_database`.
 2. **RSS path** — Background worker or `POST /admin/rss-ingest/trigger`: `classifier.pkl` tri-class → enrichment (event types, NER, geocode, match, temporal) → **FinBERT** `sentiment_*` → disruption/impact → `upsert_events`.
 
 **Web scrape JSON path** — `python -m src.json_ingest`: same scoring and enrichment pattern as RSS (uses `build_scored_event_dict` + `enrich_events_for_db`).
@@ -79,7 +80,8 @@ npm test
 | `retrain_with_feedback.py` | `classifier.pkl` | Same 3-tuple format as `train_classifier.py` |
 | `evaluate_classifier.py` | — | Loads 2- or 3-tuple `classifier.pkl` |
 | `build_impact_dataset.py`, `build_impact_hard_negative_pack.py` | CSVs | Read DB via `get_read_db_url()` (`DB_READ_URL` optional) |
-| `../scripts/train_forecast_model.py` | `../models/forecast_xgboost.json` | Recursive lag-based XGBoost risk forecaster |
+| `../scripts/train_forecast_model.py` | `../models/forecast_xgboost.json` | Legacy recursive lag-based XGBoost (used by EDSF fallback) |
+| `../scripts/train_two_stage_forecast.py` | `../models/forecast_event_prob.json`, `forecast_severity.json`, `forecast_severity_q75.json`, `forecast_intervals*.json` | **Production** two-stage XGBoost snapshot forecaster (freeze-window) |
 
 On **macOS**, if `import xgboost` fails, install OpenMP: `brew install libomp`.
 
@@ -141,31 +143,38 @@ Background worker: FastAPI **lifespan** in `main.py` (~10 minute interval).
 
 - **Canonical node list** (lat/lon, country, **criticality** 1–5) lives in **`src/load_to_db.py`** (`SUPPLIER_NODES`) and is mirrored in **`src/match_events_to_nodes.py`** (`SUPPLIER_NODES`) — keep them aligned.
 - Nodes: TSMC_Hsinchu, Foxconn_Zhengzhou, Port_of_Long_Beach, CATL_Ningde, Albemarle_Chile, Tesla_Berlin (criticalities 5,5,4,4,3,3 respectively).
-- **API `impact_score`** on each event is still **risk_score × criticality** for list responses (`process_events_with_impact` in `main.py`).
+- **`matched_node` is a JSONB array** in the DB — queries must use `@> jsonb_build_array(:n)`, not `= :n`.
+- **API `impact_score`** on each event is still **risk_score × criticality** for list responses (`process_events_with_impact` in `main.py`); if `matched_node` is a list, the max criticality among matched nodes is used.
 - **`suppliers.current_risk_score`** (exposure index, 0–100) is recomputed in **`load_to_db._recompute_supplier_risk_scores`**:
   - Per-event **strength** = `min(100, predicted_impact_score/3)` if impact is present, else `risk_score`.
   - Only events with `risk_score > 0` or non-null `predicted_impact_score` count.
   - Prefer **last 30 days**; if none qualify, fall back to **all time** (same SQL pattern as in `main.py` for AI summary context).
   - **Exposure** = `min(100, 0.62 * avg(strength) + 0.38 * max(strength))`.
+- **`Supplier`** model now includes a `products` field (optional list).
 
 ### Backend API (`src/main.py`)
 
 FastAPI app version **1.2.0** (see `app = FastAPI(..., version=...)`).
 
+Most read endpoints accept an optional `as_of=YYYY-MM-DD` query parameter to rewind results to a past UTC date (cannot be in the future).
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/` | Health / welcome JSON |
-| GET | `/suppliers` | All supplier rows including `criticality`, `current_risk_score` |
-| GET | `/events/latest` | Recent geocoded events; `impact_score` = risk × criticality |
-| GET | `/events/by_node/{node_name}` | Same, filtered by `matched_node` |
-| GET | `/events/forecasted` | Events with predictive temporal info |
-| GET | `/events/forecasted/by_node/{node_name}` | Node-filtered predictive events |
-| GET | `/summary` | Aggregate stats for dashboard |
-| GET | `/suppliers/{node_name}/forecast` | Recursive XGBoost points (`ForecastPoint`); supports `as_of` rewind |
-| GET | `/suppliers/{node_name}/hybrid_forecast` | Hybrid series with news vs historical contributions |
+| GET | `/suppliers` | All supplier rows including `criticality`, `current_risk_score`, `products`; supports `as_of` |
+| GET | `/events/latest` | Recent geocoded events; `impact_score` = risk × criticality; supports `as_of` |
+| GET | `/events/by_node/{node_name}` | Same, filtered by `matched_node`; supports `as_of` |
+| GET | `/events/forecasted` | Events with predictive temporal info; supports `as_of` |
+| GET | `/events/forecasted/by_node/{node_name}` | Node-filtered predictive events; supports `as_of` |
+| GET | `/summary` | Aggregate stats for dashboard; supports `as_of` |
+| GET | `/suppliers/{node_name}/forecast` | 14-day EDSF forecast (`HybridForecastPoint`); falls back to recursive XGBoost; supports `as_of` |
+| GET | `/suppliers/{node_name}/hybrid_forecast` | **Legacy redirect** to `/forecast`; returns `HybridForecastPoint` with `method=xgboost-recursive` |
+| GET | `/forecast-snapshots/dates` | List distinct snapshot origin dates (also at `/api/...`); `node_name` + `method` filters |
+| GET | `/suppliers/{node_name}/forecast_snapshot` | Load or generate a persisted 14-day snapshot; `date`, `method`, `include_actuals` params; returns `ForecastSnapshotResponse` with MAE (also at `/api/...`) |
 | POST | `/suppliers/{node_name}/ai-summary` | OpenRouter narrative using rollup + recent events (also mounted at `/api/...` for proxies, hidden from schema) |
 | POST | `/admin/rss-ingest/trigger` | Queue one RSS cycle |
 | GET | `/admin/rss-ingest/status` | Progress object from `rss_ingest.ingestion_status` |
+| POST | `/admin/forecast-snapshots/run` | Queue daily snapshot generation for all nodes; `forecast_date` + `method` params |
 
 CORS is open (`*`) for development; tighten for production.
 
@@ -182,24 +191,28 @@ CORS is open (`*`) for development; tighten for production.
 
 - **Event types** (`src/preprocessing.py`): e.g. `Natural_Disaster`, `Labor_Issue`, `Logistics_Issue`, `Industrial_Accident`, `Political_Regulatory`, `Demand_Supply_Shift`, `Cyber_Attack`.
 - **Risk weights** (`src/risk_scoring.py`): type weights + **FinBERT** sentiment multiplier (default) or VADER if disabled; urgency/intensifier keywords. RSS **headline** risk comes from **XGBoost** `classifier.pkl`.
-- **Forecasting** (`src/predictive_forecasting.py`): hybrid Prophet + news; `CONFIDENCE_WEIGHTS` for temporal confidence tiers, `TIME_DECAY_FACTOR` for news decay.
+- **Forecasting** has two paths:
+  - **Snapshots** (`src/forecast_snapshots.py`): Two-Stage XGBoost (freeze-window). `generate_xgboost_horizon_14` loads models, computes ~31 frozen+day-varying features, predicts `P(event) * severity` for 14 days. No Prophet dependency. Method keys: `xgboost` (q75, production default), `xgboost_q75` (same as xgboost), `xgboost_mean` (mean regression comparison). Stored in `forecast_snapshots` table.
+  - **Live** (`src/predictive_forecasting.py`): EDSF (`generate_edsf_forecast`) — Prophet baseline + gated news boost (bell curve, σ=0.5, ±2d window, max +50 uplift). Falls back to recursive XGBoost. Serves `/forecast` endpoint and RSS `generate_all_node_forecasts`.
 
 ### Data shapes
 
 - **Raw article JSON**: `url`, `title`, `content`, `source`, `timestamp` (see pipeline inputs).
 - **Event row** (DB / API): URLs, titles, timestamps, text segment, `potential_event_types`, `extracted_locations`, `matched_node`, `risk_score`, `risk_relevance_score`, `risk_severity_score`, lat/lon, `temporal_info` JSONB, `ml_risk_label`, `ml_risk_confidence`, `ml_risk_probabilities`, `predicted_disruption_probability`, `predicted_impact_score`, **`sentiment_label`**, **`sentiment_score`** (when FinBERT ran or values were set).
-- **Hybrid forecast JSON**: `ds`, `yhat`, `yhat_lower`, `yhat_upper`, `news_contribution`, `historical_contribution`, `method`.
+- **Hybrid forecast JSON** (`HybridForecastPoint`): `ds`, `yhat`, `yhat_lower`, `yhat_upper`, `news_contribution`, `historical_contribution`, `method` (`"edsf"` from EDSF engine, `"xgboost-news"` legacy, `"xgboost-recursive"` from hybrid_forecast redirect).
+- **Forecast snapshot** (`ForecastSnapshotResponse`): `node_name`, `forecast_date`, `points` (list of `ForecastSnapshotPoint`: `ds`, `yhat`, `yhat_lower`, `yhat_upper`, `y_actual`), `generated_on_demand`, `mae`, `completed_days`, `horizon_days`. Method param: `xgboost` (default, q75 production), `xgboost_mean` (comparison).
 
 ## Repository layout (concise)
 
 | Path | Role |
 |------|------|
-| `src/` | Pipeline modules, FastAPI, RSS, `db_config.py`, `sentiment_finbert.py`, `json_ingest.py`, OpenRouter client |
+| `src/` | Pipeline modules, FastAPI, RSS, `db_config.py`, `sentiment_finbert.py`, `json_ingest.py`, `forecast_snapshots.py`, OpenRouter client |
 | `config/` | `rss_feeds.json` (local), `rss_feeds.example.json` |
 | `data/raw/`, `data/processed/`, `data/forecasts/` | Inputs and pipeline outputs (many gitignored) |
 | `model_training/` | Training scripts and `.pkl` artifacts (some gitignored) |
 | `chain-calm-main/` | Operator UI |
-| `scripts/` | Optional tooling (e.g. hybrid weight tuning, `backfill_forecast_snapshots.py` uses `db_config`) |
+| `scripts/` | Training (`train_two_stage_forecast.py`), backfill (`backfill_two_stage_snapshots.py`, `backfill_q75_snapshots.py`), weight tuning |
+| `models/` | XGBoost model artifacts: `forecast_event_prob.json`, `forecast_severity*.json`, `forecast_intervals*.json`, legacy `forecast_xgboost*.json` |
 | `check_db_status.py` | Active or `--legacy` Postgres event counts |
 | `run_predictive_pipeline.py` | Batch orchestration (interactive) |
 

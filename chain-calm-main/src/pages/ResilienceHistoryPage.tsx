@@ -90,7 +90,7 @@ export default function ResilienceHistoryPage() {
         subtitle={
           forecastMode === 'live'
             ? 'Hybrid supplier risk forecast (latest pipeline output)'
-            : 'Prophet snapshot vs realized daily risk (UTC)'
+            : 'XGBoost snapshot vs realized daily risk (UTC)'
         }
       />
 

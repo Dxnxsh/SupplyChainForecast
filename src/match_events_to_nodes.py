@@ -63,6 +63,8 @@ def match_event_to_node(event):
     event_text_segment = event.get('event_text_segment', '').lower()
     combined_text = f"{article_title} {event_text_segment}".lower()
     
+    import re
+    
     # Strategy 1: Specific Node Anchors
     node_anchor_keywords = {
         'TSMC_Hsinchu': ['tsmc', 'hsinchu', 'taiwan strait', 'wafer fab'],
@@ -98,8 +100,12 @@ def match_event_to_node(event):
     }
     
     for node, keywords in node_anchor_keywords.items():
-        if any(word in combined_text for word in keywords):
-            matched_nodes.add(node)
+        for word in keywords:
+            # Use regex word boundaries to prevent substring matches (e.g. 'usa' in 'thousands')
+            pattern = r'\b' + re.escape(word) + r'\b'
+            if re.search(pattern, combined_text):
+                matched_nodes.add(node)
+                break
             
     # Strategy 2: Geographic Proximity
     event_lat = event.get('latitude')
@@ -112,15 +118,19 @@ def match_event_to_node(event):
                 
     # Strategy 3: Country Fallback (ONLY if no specific matches found)
     if not matched_nodes:
-        # Check for country keywords in combined text and extracted locations
+        # Rely primarily on extracted_locations to avoid parsing sidebar junk in combined_text
         extracted_locations = [str(loc).lower() for loc in event.get('extracted_locations', [])]
-        search_texts = extracted_locations + [combined_text]
+        search_texts = extracted_locations if extracted_locations else [combined_text]
         
         matched_countries = set()
         for country, keywords in TARGET_LOCATIONS_KEYWORDS.items():
             for text_blob in search_texts:
-                if any(k.lower() in text_blob for k in keywords):
-                    matched_countries.add(country)
+                for k in keywords:
+                    pattern = r'\b' + re.escape(k.lower()) + r'\b'
+                    if re.search(pattern, text_blob):
+                        matched_countries.add(country)
+                        break
+                if country in matched_countries:
                     break
         
         for country in matched_countries:

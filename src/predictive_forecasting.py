@@ -489,9 +489,9 @@ def train_news_enriched_model(events):
 
 def generate_edsf_forecast(events=None, node_name=None, forecast_days=14, session=None, target_date=None):
     """
-    Generates a 14-day risk forecast using the Event-Driven Decomposed Signal Fusion (EDSF) model.
-    Fuses a Prophet seasonal baseline (trained on outlier-filtered history) with a 
-    Gaussian-decay future news projection, and computes compounding news-sensitive uncertainty intervals.
+    Generates a 14-day risk forecast using the Approach A model:
+    A calibrated Prophet baseline (trained on average risk) with a 
+    gated news boost for high-confidence, future-dated events.
     """
     from sqlalchemy import text
     
@@ -502,15 +502,15 @@ def generate_edsf_forecast(events=None, node_name=None, forecast_days=14, sessio
     elif isinstance(target_date, datetime):
         target_date = target_date.date()
         
-    logger.info(f"Generating EDSF forecast for node '{node_name}' as of {target_date}...")
+    logger.info(f"Generating Prophet forecast for node '{node_name}' as of {target_date}...")
 
-    # --- Step 1: Aggregate Historical Risk ---
-    risk_by_date = defaultdict(float)
+    # --- Step 1: Aggregate Historical Risk (Average) ---
+    risk_by_date = defaultdict(list)
     
     if session is not None:
-        # Query database directly for history
+        # Query database directly for history using AVG
         q = text("""
-            SELECT article_timestamp::date AS ds, SUM(risk_score) AS y
+            SELECT article_timestamp::date AS ds, AVG(risk_score) AS y
             FROM events
             WHERE matched_node @> jsonb_build_array(:node_name)
               AND article_timestamp IS NOT NULL
@@ -520,9 +520,7 @@ def generate_edsf_forecast(events=None, node_name=None, forecast_days=14, sessio
             ORDER BY ds;
         """)
         result = session.execute(q, {"node_name": node_name, "target_date": target_date}).fetchall()
-        for row in result:
-            if row[0]:
-                risk_by_date[row[0]] = float(row[1])
+        avg_risk_by_date = {row[0]: float(row[1]) for row in result if row[0]}
     else:
         # Filter from memory events list
         if not events:
@@ -544,35 +542,42 @@ def generate_edsf_forecast(events=None, node_name=None, forecast_days=14, sessio
                     try:
                         d = pd.to_datetime(ts).date()
                         if d <= target_date:
-                            risk_by_date[d] += risk_score
+                            risk_by_date[d].append(risk_score)
                     except:
                         continue
+        avg_risk_by_date = {d: float(np.mean(scores)) for d, scores in risk_by_date.items() if scores}
 
-    # --- Step 2: Continuous Range & Outlier Filtering ---
-    if risk_by_date:
-        min_date = min(risk_by_date.keys())
+    # --- Step 2: Training Window & Gap Handling ---
+    # Cap training to last 120 days — older sparse history dilutes the learned baseline.
+    train_start = target_date - timedelta(days=120)
+    if avg_risk_by_date:
+        min_date = max(min(avg_risk_by_date.keys()), train_start)
         if (target_date - min_date).days < 30:
             min_date = target_date - timedelta(days=30)
     else:
         min_date = target_date - timedelta(days=30)
-        
+
     all_dates = pd.date_range(start=min_date, end=target_date, freq='D').date
     df = pd.DataFrame({'ds': all_dates, 'y': 0.0})
-    for d, risk in risk_by_date.items():
-        if d in df['ds'].values:
-            df.loc[df['ds'] == d, 'y'] = risk
-            
-    # Calculate 90th percentile of non-zero history to filter extreme outlier spikes
-    non_zero_y = df[df['y'] > 0]['y']
-    if not non_zero_y.empty:
-        threshold = non_zero_y.quantile(0.90)
-        median_val = non_zero_y.median()
-        # Replace extreme historical anomalies with the median to isolate stable operational noise
-        df['y_filtered'] = df['y'].apply(lambda val: median_val if val > threshold else val)
-    else:
-        df['y_filtered'] = df['y']
+    for d, risk in avg_risk_by_date.items():
+        mask = df['ds'] == d
+        if mask.any():
+            df.loc[mask, 'y'] = risk
 
-    # --- Step 3: Compute Baseline ---
+    df['y_filtered'] = df['y']
+
+    # Compute the all-days mean (including zero-event days) as the calibration target.
+    # This is the correct level: Prophet should predict the unconditional daily average,
+    # not just the average conditioned on having events.
+    recent_30_start = target_date - timedelta(days=30)
+    recent_30_dates = [d for d in all_dates if d >= recent_30_start]
+    if len(recent_30_dates) >= 14:
+        recent_mean = float(np.mean([avg_risk_by_date.get(d, 0.0) for d in recent_30_dates]))
+    else:
+        recent_mean = float(np.mean([avg_risk_by_date.get(d, 0.0) for d in all_dates]))
+    recent_mean = recent_mean if recent_mean > 0 else None
+
+    # --- Step 3: Compute Prophet Baseline & Intervals ---
     baseline_forecast = None
     if len(df[df['y_filtered'] > 0]) >= 2:
         try:
@@ -583,34 +588,55 @@ def generate_edsf_forecast(events=None, node_name=None, forecast_days=14, sessio
             model = Prophet(
                 daily_seasonality=False,
                 weekly_seasonality=True,
-                yearly_seasonality=True,
-                changepoint_prior_scale=0.05
+                yearly_seasonality=False,
+                changepoint_prior_scale=0.25,  # more responsive to recent trend shifts
+                interval_width=0.80,
             )
             model.fit(prophet_df)
-            
+
             future_dates = [target_date + timedelta(days=i) for i in range(1, forecast_days + 1)]
             future_df = pd.DataFrame({'ds': pd.to_datetime(future_dates)})
             forecast = model.predict(future_df)
-            
-            baseline_forecast = forecast[['ds', 'yhat']].copy()
+
+            baseline_forecast = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].copy()
             baseline_forecast['ds'] = baseline_forecast['ds'].dt.date
             baseline_forecast['yhat'] = baseline_forecast['yhat'].clip(lower=0)
+            baseline_forecast['yhat_lower'] = baseline_forecast['yhat_lower'].clip(lower=0)
+            baseline_forecast['yhat_upper'] = baseline_forecast['yhat_upper'].clip(lower=0)
+
+            # --- Level calibration: shift Prophet output to match recent realized mean ---
+            # Prophet converges to the training series mean; when the series mean is
+            # suppressed by ffill gaps the forecast undershoots. Correct by rescaling
+            # so the average predicted level matches the recent non-zero event mean.
+            if recent_mean is not None and recent_mean > 0:
+                prophet_mean = float(baseline_forecast['yhat'].mean())
+                if prophet_mean > 0:
+                    scale = recent_mean / prophet_mean
+                    # Clamp scale to [0.5, 3.0] to avoid wild extrapolation
+                    scale = max(0.5, min(3.0, scale))
+                    baseline_forecast['yhat'] = (baseline_forecast['yhat'] * scale).clip(lower=0)
+                    baseline_forecast['yhat_lower'] = (baseline_forecast['yhat_lower'] * scale).clip(lower=0)
+                    baseline_forecast['yhat_upper'] = (baseline_forecast['yhat_upper'] * scale).clip(lower=0)
+
         except Exception as e:
             logger.warning(f"Prophet baseline fit failed for {node_name}: {e}")
-            
-    # Fallback to rolling median if Prophet cannot be fitted or fails
+
+    # Fallback to recent mean if Prophet cannot be fitted or fails
     if baseline_forecast is None or baseline_forecast.empty:
         non_zero_filtered = df[df['y_filtered'] > 0]['y_filtered']
-        fallback_median = float(non_zero_filtered.median()) if not non_zero_filtered.empty else 10.0
-        if fallback_median <= 0:
-            fallback_median = 10.0
+        fallback_val = float(recent_mean) if recent_mean else (float(non_zero_filtered.median()) if not non_zero_filtered.empty else 10.0)
+        if fallback_val <= 0:
+            fallback_val = 10.0
+        std_val = float(non_zero_filtered.std()) if len(non_zero_filtered) > 1 else fallback_val * 0.3
         future_dates = [target_date + timedelta(days=i) for i in range(1, forecast_days + 1)]
         baseline_forecast = pd.DataFrame({
             'ds': future_dates,
-            'yhat': [fallback_median] * forecast_days
+            'yhat': [fallback_val] * forecast_days,
+            'yhat_lower': [max(0.0, fallback_val - std_val)] * forecast_days,
+            'yhat_upper': [fallback_val + std_val] * forecast_days
         })
 
-    # --- Step 4: Gaussian News Signal Temporal Dispersion ---
+    # --- Step 4: Gated News Boost ---
     if not events:
         events = load_temporal_enriched_events()
         
@@ -626,11 +652,18 @@ def generate_edsf_forecast(events=None, node_name=None, forecast_days=14, sessio
             
         if is_match:
             temporal_info = e.get('temporal_info') or {}
-            if temporal_info.get('is_predictive') and temporal_info.get('predicted_date'):
+            # GATED LOGIC: Only strictly future events (>=2 days lead) with high confidence
+            days_until = temporal_info.get('days_until_event')
+            confidence = temporal_info.get('predicted_date_confidence', 'none')
+            
+            if (temporal_info.get('is_predictive') and 
+                temporal_info.get('predicted_date') and
+                days_until is not None and days_until >= 2 and
+                confidence == 'high'):
                 predictive_events.append(e)
                 
     news_by_date = defaultdict(float)
-    sigma = 1.0
+    sigma = 0.5  # Tighter sigma so it doesn't bleed everywhere
     future_dates = [target_date + timedelta(days=i) for i in range(1, forecast_days + 1)]
     
     for fd in future_dates:
@@ -643,39 +676,40 @@ def generate_edsf_forecast(events=None, node_name=None, forecast_days=14, sessio
             except:
                 continue
                 
-            confidence = temporal_info.get('predicted_date_confidence', 'none')
-            confidence_weight = CONFIDENCE_WEIGHTS.get(confidence, 0.5)
-            weighted_risk = e.get('risk_score', 0) * confidence_weight
+            weighted_risk = e.get('risk_score', 0) * 1.0 # High confidence weight
             
-            # Reproject backward/forward relative to target_date using original lead-time
+            # Reproject using original lead-time
             days_until = temporal_info.get('days_until_event')
-            if days_until is not None and days_until >= 0:
-                projected_date = target_date + timedelta(days=max(1, days_until))
-            else:
-                projected_date = pred_date
+            projected_date = target_date + timedelta(days=days_until)
                 
             delta_days = (fd - projected_date).days
-            if abs(delta_days) <= 3:  # 3-day truncation limit for bell-curve
+            if abs(delta_days) <= 2:  # 2-day truncation limit for bell-curve
                 bell_factor = np.exp(-(delta_days ** 2) / (2 * (sigma ** 2)))
                 total_news_risk += weighted_risk * bell_factor
                 
-        news_by_date[fd] = total_news_risk
+        # Cap the maximum news uplift to prevent runaway scaling (e.g. max 50 points of boost)
+        news_by_date[fd] = min(total_news_risk, 50.0)
 
-    # --- Step 5: Decomposed Fusion & Bounds ---
+    # --- Step 5: Fusion ---
     forecast_points = []
     for i in range(1, forecast_days + 1):
         fd = target_date + timedelta(days=i)
         
         baseline_row = baseline_forecast[baseline_forecast['ds'] == fd]
         baseline_risk = float(baseline_row.iloc[0]['yhat']) if not baseline_row.empty else 10.0
+        yhat_lower = float(baseline_row.iloc[0]['yhat_lower']) if not baseline_row.empty else baseline_risk * 0.8
+        yhat_upper = float(baseline_row.iloc[0]['yhat_upper']) if not baseline_row.empty else baseline_risk * 1.2
         
         news_risk = news_by_date[fd]
         yhat = baseline_risk + news_risk
         
-        # Compounding news-sensitive margin formula
-        margin = 30.0 + 4.0 * i + 0.5 * news_risk
-        yhat_lower = max(0.0, yhat - margin)
-        yhat_upper = yhat + margin
+        # News expands the upper bound only
+        yhat_upper = yhat_upper + (news_risk * 1.5)
+        
+        # Ensure values stay roughly within 0-100 scale logically
+        yhat = min(100.0, yhat)
+        yhat_lower = min(100.0, max(0.0, yhat_lower))
+        yhat_upper = min(100.0, yhat_upper)
         
         forecast_points.append({
             'ds': fd,

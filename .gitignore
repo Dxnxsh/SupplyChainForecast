@@ -67,6 +67,9 @@ model_training/**/*.csv
 # Cursor local workspace settings (optional; remove this line if you want them shared)
 .cursor/
 
+# Local Tools
+scratch/
+
 # Documentation
 docs/
 !docs/superpowers/specs/

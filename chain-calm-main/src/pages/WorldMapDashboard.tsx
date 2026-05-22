@@ -22,7 +22,6 @@ import { PRODUCT_EDGES } from '@/lib/productEdges';
 
 export default function WorldMapDashboard() {
   const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
-  const [filterCountry, setFilterCountry] = useState<string>('all');
   const [filterProduct, setFilterProduct] = useState<string>('all');
   /** YYYY-MM-DD UTC calendar day, or '' for live data */
   const [rewindDate, setRewindDate] = useState<string>('');
@@ -121,9 +120,8 @@ export default function WorldMapDashboard() {
   }, [suppliers, filterProduct]);
 
   const filteredSuppliers = suppliers.filter((s) => {
-    const matchCountry = filterCountry === 'all' || s.country === filterCountry;
     const matchProduct = filterProduct === 'all' || (s.products && s.products.includes(filterProduct));
-    return matchCountry && matchProduct;
+    return matchProduct;
   });
 
   const countries = [...new Set(suppliers.map((s) => s.country))].sort();
@@ -218,27 +216,6 @@ export default function WorldMapDashboard() {
               </Button>
             </div>
             <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Filter by country:</span>
-            </div>
-            <Select value={filterCountry} onValueChange={setFilterCountry}>
-              <SelectTrigger className="w-48 bg-secondary/50">
-                <SelectValue placeholder="Country" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Countries</SelectItem>
-                {countries.map((country) => (
-                  <SelectItem key={country} value={country}>
-                    {country}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" size="sm" type="button" onClick={() => setFilterCountry('all')}>
-              Clear country
-            </Button>
-            
-            <div className="flex items-center gap-2 ml-4">
               <Filter className="w-4 h-4 text-muted-foreground" />
               <span className="text-sm text-muted-foreground">Filter by product:</span>
             </div>

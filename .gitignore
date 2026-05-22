@@ -34,9 +34,6 @@ dist/
 .env.*
 !.env.example
 
-# Local app config (use rss_feeds.example.json as template)
-config/rss_feeds.json
-
 # Node / frontend
 node_modules/
 coverage/

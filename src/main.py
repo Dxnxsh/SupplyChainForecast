@@ -113,13 +113,13 @@ class ForecastPoint(BaseModel):
         from_attributes = True
 
 class HybridForecastPoint(BaseModel):
-    ds: date # The date for the forecast point
-    yhat: float # The hybrid forecasted value
-    yhat_lower: float # The lower bound
-    yhat_upper: float # The upper bound
-    news_contribution: float # Risk from predictive news articles
-    historical_contribution: float # Risk from historical trends
-    method: str # "hybrid" or "historical_only"
+    ds: date
+    yhat: float
+    yhat_lower: float
+    yhat_upper: float
+    news_contribution: Optional[float] = None
+    historical_contribution: Optional[float] = None
+    method: str
     class Config:
         from_attributes = True
 
@@ -790,129 +790,91 @@ def get_dashboard_summary(
 
 @app.get("/suppliers/{node_name}/forecast", response_model=List[HybridForecastPoint], tags=["Forecasting"])
 def get_risk_forecast(
-    node_name: str, 
+    node_name: str,
     as_of: Optional[date] = Depends(_parse_as_of_optional),
     db: Session = Depends(get_db)
 ):
-    """
-    Generates a 14-day risk score forecast for a specific supplier node using recursive XGBoost.
-    """
+    """14-day risk forecast using the two-stage XGBoost snapshot model."""
     try:
         target_date = as_of or date.today()
-        
-        # Try running EDSF forecasting as primary
+        from src.forecast_snapshots import SOURCE_ON_DEMAND, ensure_snapshot_for_node
         try:
-            from src.predictive_forecasting import generate_edsf_forecast
-            forecast_df = generate_edsf_forecast(
-                node_name=node_name,
-                forecast_days=14,
-                session=db,
-                target_date=target_date
-            )
-            forecast_points = forecast_df.to_dict('records')
-            
-            # Map clean dates to strings/dates expected by response schema
-            return [
-                {
-                    "ds": p["ds"],
-                    "yhat": p["yhat"],
-                    "yhat_lower": p["yhat_lower"],
-                    "yhat_upper": p["yhat_upper"],
-                    "news_contribution": p["news_contribution"],
-                    "historical_contribution": p["historical_contribution"],
-                    "method": "xgboost-news"  # Retain tag for UI schema compatibility
-                }
-                for p in forecast_points
-            ]
-        except Exception as edsf_err:
-            logger.warning(f"⚠️ EDSF forecast failed for node '{node_name}', falling back to recursive XGBoost: {edsf_err}", exc_info=True)
-            
-            # Legacy Recursive XGBoost Fallback
-            # 1. Fetch historical risk data for the node up to as_of
-            query = text("""
-                SELECT article_timestamp::date as ds, AVG(risk_score) as y, COUNT(*) as event_count
-                FROM events
-                WHERE matched_node @> jsonb_build_array(:node_name) 
-                  AND article_timestamp IS NOT NULL 
-                  AND risk_score IS NOT NULL
-                  AND article_timestamp::date <= :as_of
-                GROUP BY ds
-                ORDER BY ds;
-            """)
-            result = db.execute(query, {"node_name": node_name, "as_of": target_date}).fetchall()
-            
-            raw_df = pd.DataFrame(result, columns=['ds', 'y', 'event_count'])
-            raw_df['ds'] = pd.to_datetime(raw_df['ds'])
-            
-            start_date = target_date - timedelta(days=30)
-            full_range = pd.date_range(start=start_date, end=target_date, freq='D')
-            df = pd.DataFrame({'ds': full_range})
-            df = df.merge(raw_df, on='ds', how='left').fillna(0)
-            
-            model_path = "models/forecast_xgboost_news.json"
-            if not os.path.exists(model_path):
-                model_path = "models/forecast_xgboost.json"
-                
-            model = xgb.XGBRegressor()
-            model.load_model(model_path)
-            
-            from src.predictive_forecasting import load_temporal_enriched_events, create_future_risk_projections, get_news_risk_for_date
-            events = load_temporal_enriched_events()
-            news_projections = create_future_risk_projections(events, forecast_days=30)
-            
-            forecast_points = []
-            current_df = df.copy()
-            
-            for i in range(1, 15):
-                next_date = target_date + timedelta(days=i)
-                news_risk = get_news_risk_for_date(news_projections, node_name, next_date)
-                
-                features = {
-                    'risk_lag_1': current_df['y'].iloc[-1],
-                    'risk_lag_2': current_df['y'].iloc[-2],
-                    'risk_lag_3': current_df['y'].iloc[-3],
-                    'risk_lag_7': current_df['y'].iloc[-7],
-                    'rolling_avg_7': current_df['y'].tail(7).mean(),
-                    'news_risk': news_risk
-                }
-                
-                X = pd.DataFrame([features])
-                yhat = model.predict(X)[0]
-                yhat = max(0, float(yhat))
-                
-                margin = 35.0 + 5.0 * i + 0.4 * yhat
-                yhat_lower = max(0.0, yhat - margin)
-                yhat_upper = yhat + margin
-                
-                forecast_points.append({
-                    "ds": next_date,
-                    "yhat": round(yhat, 2),
-                    "yhat_lower": round(yhat_lower, 2),
-                    "yhat_upper": round(yhat_upper, 2),
-                    "news_contribution": round(news_risk, 2),
-                    "historical_contribution": round(yhat - news_risk if yhat > news_risk else 0, 2)
-                })
-                
-                new_row = pd.DataFrame({
-                    'ds': [pd.Timestamp(next_date)],
-                    'y': [yhat],
-                    'event_count': [0]
-                })
-                current_df = pd.concat([current_df, new_row], ignore_index=True)
-    
-            return [
-                {
-                    **p,
-                    "method": "xgboost-news"
-                }
-                for p in forecast_points
-            ]
-        
-    except HTTPException as e:
-        raise e
+            rows, _ = ensure_snapshot_for_node(db, node_name, target_date, SOURCE_ON_DEMAND, method="xgboost")
+        except FileNotFoundError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"Could not build forecast for '{node_name}' on {target_date}.")
+        return [
+            {
+                "ds": r["ds"],
+                "yhat": r["yhat"],
+                "yhat_lower": r["yhat_lower"],
+                "yhat_upper": r["yhat_upper"],
+                "method": "xgboost",
+            }
+            for r in rows
+        ]
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"❌ Unhandled error generating forecast for '{node_name}': {e}", exc_info=True)
+        logger.error(f"❌ Forecast error for '{node_name}': {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Could not generate forecast: {e}")
+
+@app.get("/suppliers/{node_name}/risk_history", tags=["Forecasting"])
+def get_risk_history(
+    node_name: str,
+    days: int = Query(60, ge=1, le=730),
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
+    db: Session = Depends(get_db)
+):
+    """Daily realized avg(risk_score) for a node going back `days` days from as_of (default today)."""
+    from src.forecast_snapshots import fetch_actuals_for_horizon
+    anchor = as_of or date.today()
+    horizon_days = [anchor - timedelta(days=i) for i in range(days - 1, -1, -1)]
+    actuals = fetch_actuals_for_horizon(db, node_name, horizon_days)
+    return [{"ds": str(d), "y_actual": actuals.get(d, 0.0)} for d in horizon_days]
+
+
+@app.get("/suppliers/{node_name}/forecast_trace", tags=["Forecasting"])
+def get_forecast_trace(
+    node_name: str,
+    days: int = Query(60, ge=1, le=730),
+    as_of: Optional[date] = Depends(_parse_as_of_optional),
+    db: Session = Depends(get_db),
+):
+    """
+    For each historical day, return the yhat that was predicted one day prior.
+    Used to draw the 'predicted' line over the history section of the timeline.
+    Selects from forecast_snapshots where forecast_date = horizon_day - 1 AND
+    horizon_day falls within [anchor-days .. anchor].
+    """
+    anchor = as_of or date.today()
+    start = anchor - timedelta(days=days - 1)
+    rows = db.execute(
+        text(
+            """
+            SELECT horizon_day AS ds, yhat, yhat_lower, yhat_upper
+            FROM forecast_snapshots
+            WHERE node_name = :n
+              AND method = 'xgboost'
+              AND horizon_day >= :start
+              AND horizon_day <= :anchor
+              AND forecast_date = horizon_day - INTERVAL '1 day'
+            ORDER BY horizon_day
+            """
+        ),
+        {"n": node_name, "start": start, "anchor": anchor},
+    ).fetchall()
+    return [
+        {
+            "ds": str(dict(r._mapping)["ds"]),
+            "yhat": float(dict(r._mapping)["yhat"]),
+            "yhat_lower": float(dict(r._mapping)["yhat_lower"]),
+            "yhat_upper": float(dict(r._mapping)["yhat_upper"]),
+        }
+        for r in rows
+    ]
+
 
 @app.get("/suppliers/{node_name}/hybrid_forecast", response_model=List[HybridForecastPoint], tags=["Forecasting"])
 def get_hybrid_forecast(

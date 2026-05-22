@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Supply chain disruption monitoring and forecasting: articles become structured events (NLP, geocoding, node matching, temporal hints), scored for risk, rolled up per supplier node, and forecasted via **Two-Stage XGBoost** (snapshots/rewind) and **EDSF** (live). **PostgreSQL** is the system of record. **FastAPI** (`src/main.py`) serves the API. **Live news** enters through **RSS ingestion** (`src/rss_ingest.py`). The **Vite + React** app in `chain-calm-main/` is the operator dashboard.
+Supply chain disruption monitoring and forecasting: articles become structured events (NLP, geocoding, node matching, temporal hints), scored for risk, rolled up per supplier node, and forecasted via **Two-Stage XGBoost** (snapshots). **PostgreSQL** is the system of record. **FastAPI** (`src/main.py`) serves the API. **Live news** enters through **RSS ingestion** (`src/rss_ingest.py`). The **Vite + React** app in `chain-calm-main/` is the operator dashboard.
 
 **ML stack (production paths):**
 
@@ -12,12 +12,12 @@ Supply chain disruption monitoring and forecasting: articles become structured e
 - **Batch heuristic risk** (`risk_score`, relevance/severity): rule features + **FinBERT** sentiment by default (`src/sentiment_finbert.py`, `src/risk_scoring.py`); set `USE_FINBERT_RISK=0` for VADER.
 - **Disruption + impact** (optional pickles): TF-IDF + categoricals + **XGBoost** classifier + **XGBoost** regressor (`disruption_classifier.pkl`, `impact_regressor_v2.pkl`). Same inference on **RSS** and **batch** via `apply_batch_disruption_and_impact`.
 - **Risk Forecasting (Snapshots)**: **Two-Stage XGBoost** (`src/forecast_snapshots.py`) is the production snapshot engine. Stage 1 (`models/forecast_event_prob.json`, XGBClassifier) predicts P(event); Stage 2 (`models/forecast_severity_q75.json`, XGBRegressor with quantile q=0.75) predicts E[risk | event]. Final: `yhat = P(event) * severity`. Uses **freeze-window** architecture (no recursive predictions — all features computed from actual data at forecast_date, `day_offset` differentiates horizon days). Method keys: `xgboost` (default, q75), `xgboost_mean` (mean regression variant for comparison). Trained via `scripts/train_two_stage_forecast.py`.
-- **Risk Forecasting (Live)**: **EDSF** (`src/predictive_forecasting.generate_edsf_forecast`) serves the live `/forecast` endpoint — calibrated Prophet baseline fused with gated news boost. Falls back to recursive XGBoost. RSS pipeline also calls `generate_all_node_forecasts` (EDSF path). The live path does NOT use the two-stage model.
+- **Risk Forecasting (Live)**: The `/forecast` endpoint uses **Two-Stage XGBoost** via `ensure_snapshot_for_node` — same model as snapshots. `src/predictive_forecasting.py` (EDSF/Prophet) is retained as a legacy module but is no longer on any active production path.
 
 Two ways data gets into the database:
 
-1. **Batch pipeline** — `run_predictive_pipeline.py`: raw JSON under `data/raw/web_scrape/` → filter → **FinBERT/VADER risk scoring** → geocode → match → optional temporal → **`apply_batch_disruption_and_impact`** (XGB disruption/impact) → optional EDSF/Prophet forecast → `load_to_db.populate_database`.
-2. **RSS path** — Background worker or `POST /admin/rss-ingest/trigger`: `classifier.pkl` tri-class → enrichment (event types, NER, geocode, match, temporal) → **FinBERT** `sentiment_*` → disruption/impact → `upsert_events`.
+1. **Batch pipeline** — `run_predictive_pipeline.py`: raw JSON under `data/raw/web_scrape/` → filter → **FinBERT/VADER risk scoring** → geocode → match → optional temporal → **`apply_batch_disruption_and_impact`** (XGB disruption/impact) → `load_to_db.populate_database` → **XGBoost forecast snapshots** (`snapshot_all_nodes_for_date`).
+2. **RSS path** — Background worker or `POST /admin/rss-ingest/trigger`: `classifier.pkl` tri-class → enrichment (event types, NER, geocode, match, temporal) → **FinBERT** `sentiment_*` → disruption/impact → `upsert_events` → **XGBoost forecast snapshots** (`snapshot_all_nodes_for_date`).
 
 **Web scrape JSON path** — `python -m src.json_ingest`: same scoring and enrichment pattern as RSS (uses `build_scored_event_dict` + `enrich_events_for_db`).
 
@@ -125,8 +125,8 @@ data/raw/web_scrape/*.json
   → src/match_events_to_nodes.py  matched_events.jsonl
   → src/temporal_extraction.py    temporal_enriched_events.jsonl (optional “full” run)
   → src/rss_ingest.apply_batch_disruption_and_impact  XGB disruption + impact (same pickles as RSS); skips if .pkl missing
-  → src/predictive_forecasting.py data/forecasts/{node}_forecast.json (optional)
   → src/load_to_db.py             PostgreSQL (suppliers + events)
+  → src/forecast_snapshots.snapshot_all_nodes_for_date  XGBoost 14-day snapshots → forecast_snapshots table (optional, requires DB)
 ```
 
 ### RSS data flow (`src/rss_ingest.py`)
@@ -136,6 +136,7 @@ data/raw/web_scrape/*.json
 - **FinBERT** (default): `sentiment_label`, `sentiment_score` on each event.
 - **Disruption / impact** pickles → `predicted_disruption_probability`, `predicted_impact_score`.
 - **`load_to_db.upsert_events`** → supplier rollups (`_recompute_supplier_risk_scores`).
+- **XGBoost snapshots**: `snapshot_all_nodes_for_date` refreshes today's 14-day forecast in `forecast_snapshots` table.
 
 Background worker: FastAPI **lifespan** in `main.py` (~10 minute interval).
 
@@ -167,8 +168,10 @@ Most read endpoints accept an optional `as_of=YYYY-MM-DD` query parameter to rew
 | GET | `/events/forecasted` | Events with predictive temporal info; supports `as_of` |
 | GET | `/events/forecasted/by_node/{node_name}` | Node-filtered predictive events; supports `as_of` |
 | GET | `/summary` | Aggregate stats for dashboard; supports `as_of` |
-| GET | `/suppliers/{node_name}/forecast` | 14-day EDSF forecast (`HybridForecastPoint`); falls back to recursive XGBoost; supports `as_of` |
-| GET | `/suppliers/{node_name}/hybrid_forecast` | **Legacy redirect** to `/forecast`; returns `HybridForecastPoint` with `method=xgboost-recursive` |
+| GET | `/suppliers/{node_name}/forecast` | 14-day Two-Stage XGBoost forecast via `ensure_snapshot_for_node` (`HybridForecastPoint`); supports `as_of` |
+| GET | `/suppliers/{node_name}/risk_history` | Daily realized `avg(risk_score)` going back `days` (default 60); supports `as_of` |
+| GET | `/suppliers/{node_name}/forecast_trace` | Day-before XGBoost predictions for each historical day (used by timeline chart); supports `as_of` |
+| GET | `/suppliers/{node_name}/hybrid_forecast` | **Legacy redirect** to `/forecast` |
 | GET | `/forecast-snapshots/dates` | List distinct snapshot origin dates (also at `/api/...`); `node_name` + `method` filters |
 | GET | `/suppliers/{node_name}/forecast_snapshot` | Load or generate a persisted 14-day snapshot; `date`, `method`, `include_actuals` params; returns `ForecastSnapshotResponse` with MAE (also at `/api/...`) |
 | POST | `/suppliers/{node_name}/ai-summary` | OpenRouter narrative using rollup + recent events (also mounted at `/api/...` for proxies, hidden from schema) |
@@ -191,15 +194,13 @@ CORS is open (`*`) for development; tighten for production.
 
 - **Event types** (`src/preprocessing.py`): e.g. `Natural_Disaster`, `Labor_Issue`, `Logistics_Issue`, `Industrial_Accident`, `Political_Regulatory`, `Demand_Supply_Shift`, `Cyber_Attack`.
 - **Risk weights** (`src/risk_scoring.py`): type weights + **FinBERT** sentiment multiplier (default) or VADER if disabled; urgency/intensifier keywords. RSS **headline** risk comes from **XGBoost** `classifier.pkl`.
-- **Forecasting** has two paths:
-  - **Snapshots** (`src/forecast_snapshots.py`): Two-Stage XGBoost (freeze-window). `generate_xgboost_horizon_14` loads models, computes ~31 frozen+day-varying features, predicts `P(event) * severity` for 14 days. No Prophet dependency. Method keys: `xgboost` (q75, production default), `xgboost_q75` (same as xgboost), `xgboost_mean` (mean regression comparison). Stored in `forecast_snapshots` table.
-  - **Live** (`src/predictive_forecasting.py`): EDSF (`generate_edsf_forecast`) — Prophet baseline + gated news boost (bell curve, σ=0.5, ±2d window, max +50 uplift). Falls back to recursive XGBoost. Serves `/forecast` endpoint and RSS `generate_all_node_forecasts`.
+- **Forecasting** (`src/forecast_snapshots.py`): Two-Stage XGBoost (freeze-window) is the single production path for all forecast endpoints and pipelines. `generate_xgboost_horizon_14` loads models, computes ~31 frozen+day-varying features, predicts `P(event) * severity` for 14 days. Method keys: `xgboost` (q75, production default), `xgboost_mean` (mean regression comparison). Stored in `forecast_snapshots` table. `src/predictive_forecasting.py` (EDSF/Prophet) is a legacy module — retained but not on any active production path.
 
 ### Data shapes
 
 - **Raw article JSON**: `url`, `title`, `content`, `source`, `timestamp` (see pipeline inputs).
 - **Event row** (DB / API): URLs, titles, timestamps, text segment, `potential_event_types`, `extracted_locations`, `matched_node`, `risk_score`, `risk_relevance_score`, `risk_severity_score`, lat/lon, `temporal_info` JSONB, `ml_risk_label`, `ml_risk_confidence`, `ml_risk_probabilities`, `predicted_disruption_probability`, `predicted_impact_score`, **`sentiment_label`**, **`sentiment_score`** (when FinBERT ran or values were set).
-- **Hybrid forecast JSON** (`HybridForecastPoint`): `ds`, `yhat`, `yhat_lower`, `yhat_upper`, `news_contribution`, `historical_contribution`, `method` (`"edsf"` from EDSF engine, `"xgboost-news"` legacy, `"xgboost-recursive"` from hybrid_forecast redirect).
+- **Forecast JSON** (`HybridForecastPoint`): `ds`, `yhat`, `yhat_lower`, `yhat_upper`, `method` (`"xgboost"` from live and snapshot endpoints). `news_contribution` and `historical_contribution` are optional nulls retained for schema compatibility.
 - **Forecast snapshot** (`ForecastSnapshotResponse`): `node_name`, `forecast_date`, `points` (list of `ForecastSnapshotPoint`: `ds`, `yhat`, `yhat_lower`, `yhat_upper`, `y_actual`), `generated_on_demand`, `mae`, `completed_days`, `horizon_days`. Method param: `xgboost` (default, q75 production), `xgboost_mean` (comparison).
 
 ## Repository layout (concise)

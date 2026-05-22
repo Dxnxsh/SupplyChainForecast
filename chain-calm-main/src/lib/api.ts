@@ -47,9 +47,21 @@ export interface BackendHybridForecastPoint {
   yhat: number;
   yhat_lower: number;
   yhat_upper: number;
-  news_contribution: number;
-  historical_contribution: number;
+  news_contribution?: number | null;
+  historical_contribution?: number | null;
   method: string;
+}
+
+export interface RiskHistoryPoint {
+  ds: string;
+  y_actual: number;
+}
+
+export interface ForecastTracePoint {
+  ds: string;
+  yhat: number;
+  yhat_lower: number;
+  yhat_upper: number;
 }
 
 export interface RssIngestStatus {
@@ -127,6 +139,14 @@ export const api = {
   getSupplierForecast: (nodeName: string, asOf?: string | null) =>
     fetchJson<BackendHybridForecastPoint[]>(
       `/suppliers/${encodeURIComponent(nodeName)}/forecast${asOfParam(asOf)}`
+    ),
+  getRiskHistory: (nodeName: string, days = 60, asOf?: string | null) =>
+    fetchJson<RiskHistoryPoint[]>(
+      `/suppliers/${encodeURIComponent(nodeName)}/risk_history?days=${days}${asOfParam(asOf)}`
+    ),
+  getForecastTrace: (nodeName: string, days = 60, asOf?: string | null) =>
+    fetchJson<ForecastTracePoint[]>(
+      `/suppliers/${encodeURIComponent(nodeName)}/forecast_trace?days=${days}${asOfParam(asOf)}`
     ),
   getSummary: (asOf?: string | null) =>
     fetchJson<BackendSummary>(`/summary${asOf && asOf.length > 0 ? `?as_of=${encodeURIComponent(asOf)}` : ''}`),

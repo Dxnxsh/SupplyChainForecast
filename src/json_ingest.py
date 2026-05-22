@@ -196,12 +196,16 @@ def run_json_ingest(
     print(f"✅ Upserted {len(batch)} event(s).")
 
     if regenerate_forecasts:
-        from src.predictive_forecasting import generate_all_node_forecasts
-
-        all_events = get_all_events(engine)
-        if all_events:
-            generate_all_node_forecasts(all_events)
-            print("✅ Regenerated hybrid forecast files.")
+        try:
+            from sqlalchemy.orm import sessionmaker
+            from src.forecast_snapshots import snapshot_all_nodes_for_date, SOURCE_SCHEDULED
+            from datetime import date as _date
+            SessionLocal = sessionmaker(bind=engine)
+            with SessionLocal() as _sess:
+                result = snapshot_all_nodes_for_date(_sess, _date.today(), source=SOURCE_SCHEDULED, method="xgboost")
+            print(f"✅ Refreshed XGBoost forecast snapshots (saved: {result['saved']}, failed: {len(result['failed'])}).")
+        except Exception as _fe:
+            print(f"⚠️  Forecast snapshot refresh failed (non-fatal): {_fe}")
 
     return len(batch)
 

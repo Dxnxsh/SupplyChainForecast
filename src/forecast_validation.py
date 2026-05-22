@@ -50,14 +50,25 @@ def compute_actual_risk_by_date_and_node(events):
     return risk_by_date_node
 
 
-def load_forecast(node_name):
-    """Load a generated forecast JSON file."""
-    filepath = f'data/forecasts/{node_name}_forecast.json'
-    if not os.path.exists(filepath):
+def load_forecast(node_name, forecast_date=None):
+    """Load forecast from the forecast_snapshots DB table for the given date (defaults to today)."""
+    try:
+        from src.db_config import get_db_url
+        from sqlalchemy import create_engine
+        from sqlalchemy.orm import sessionmaker
+        from src.forecast_snapshots import load_snapshot_rows, snapshot_exists
+        from datetime import date as _date
+        engine = create_engine(get_db_url())
+        SessionLocal = sessionmaker(bind=engine)
+        fd = forecast_date or _date.today()
+        with SessionLocal() as session:
+            if not snapshot_exists(session, node_name, fd, method="xgboost"):
+                return None
+            rows = load_snapshot_rows(session, node_name, fd, method="xgboost")
+        return [{"ds": str(r["ds"]), "yhat": r["yhat"], "yhat_lower": r["yhat_lower"], "yhat_upper": r["yhat_upper"]} for r in rows]
+    except Exception as e:
+        logger.warning("Could not load forecast for %s from DB: %s", node_name, e)
         return None
-    
-    with open(filepath, 'r') as f:
-        return json.load(f)
 
 
 def compute_mae(forecast_df, actual_values):

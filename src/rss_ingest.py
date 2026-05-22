@@ -572,14 +572,19 @@ def run_once(
         create_tables(engine)
         upsert_events(engine, batch, recompute_supplier_scores=True)
         
-        # 5. Recompute Forecasts
+        # 5. Refresh XGBoost forecast snapshots for today
         if is_background:
-            update_status(current_step="Recomputing Hybrid Forecasts...", progress_percent=95)
-            
-        from src.predictive_forecasting import generate_all_node_forecasts
-        all_events = get_all_events(engine)
-        if all_events:
-            generate_all_node_forecasts(all_events)
+            update_status(current_step="Refreshing forecast snapshots...", progress_percent=95)
+
+        try:
+            from sqlalchemy.orm import sessionmaker
+            from src.forecast_snapshots import snapshot_all_nodes_for_date, SOURCE_SCHEDULED
+            from datetime import date as _date
+            SessionLocal = sessionmaker(bind=engine)
+            with SessionLocal() as _sess:
+                snapshot_all_nodes_for_date(_sess, _date.today(), source=SOURCE_SCHEDULED, method="xgboost")
+        except Exception as _fe:
+            print(f"⚠️  Forecast snapshot refresh failed (non-fatal): {_fe}")
         
         if is_background:
             update_status(current_step="Idle", progress_percent=100, is_running=False)

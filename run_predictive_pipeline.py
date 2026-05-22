@@ -30,7 +30,6 @@ from src.risk_scoring import score_all_events, save_scored_data
 from src.geocoding import geocode_events, save_geocoded_data
 from src.match_events_to_nodes import match_all_events, save_matched_events
 from src.temporal_extraction import enrich_events_with_temporal_data, save_temporal_enriched_data
-from src.predictive_forecasting import generate_all_node_forecasts
 from src.load_to_db import get_db_engine, create_tables, populate_database
 
 
@@ -39,11 +38,10 @@ def print_header():
     print("\n" + "="*80, flush=True)
     print("🚀 SUPPLY CHAIN PREDICTIVE FORECASTING PIPELINE (OPTIMIZED)", flush=True)
     print("="*80, flush=True)
-    print("\nThis pipeline enables forecasting based on news about UPCOMING events:", flush=True)
-    print("  ✅ Hurricane warnings with predicted landfall dates", flush=True)
-    print("  ✅ Scheduled strikes and labor actions", flush=True)
-    print("  ✅ Announced regulatory changes", flush=True)
-    print("  ✅ Expected logistics disruptions", flush=True)
+    print("\nThis pipeline runs full batch processing and refreshes XGBoost forecast snapshots:", flush=True)
+    print("  ✅ Risk scoring, geocoding, node matching, temporal extraction", flush=True)
+    print("  ✅ Disruption & impact inference (XGBoost pickles)", flush=True)
+    print("  ✅ Two-stage XGBoost forecast snapshots written to PostgreSQL", flush=True)
     print("\n" + "="*80 + "\n", flush=True)
 
 
@@ -122,19 +120,18 @@ def print_summary(forecasts_ran: bool, db_loaded: bool):
     print("="*80)
     print("\nGenerated Outputs:")
     if forecasts_ran:
-        print("  📁 data/forecasts/*.json")
+        print("  🐘 XGBoost forecast snapshots written to PostgreSQL (forecast_snapshots table)")
     else:
-        print("  📁 Forecast generation skipped")
+        print("  📁 Forecast snapshot generation skipped")
     if db_loaded:
-        print("  🐘 Data loaded to PostgreSQL")
+        print("  🐘 Events and suppliers loaded to PostgreSQL")
     else:
         print("  🐘 Database load skipped")
     print("\nNext Steps:")
-    print("  1. Review forecast files in data/forecasts/")
-    print("  2. Start API: venv311/bin/python -m uvicorn src.main:app --host 127.0.0.1 --port 8000")
-    print("  3. Test hybrid forecast endpoint:")
-    print("     curl http://127.0.0.1:8000/suppliers/[NODE_NAME]/hybrid_forecast")
-    print("  4. UI: cd chain-calm-main && npm run dev (expects API on :8000)")
+    print("  1. Start API: venv311/bin/python -m uvicorn src.main:app --host 127.0.0.1 --port 8000")
+    print("  2. Test forecast endpoint:")
+    print("     curl http://127.0.0.1:8000/suppliers/[NODE_NAME]/forecast")
+    print("  3. UI: cd chain-calm-main && npm run dev (expects API on :8000)")
     print("\nDocumentation:")
     print("  📖 See CLAUDE.md for pipeline and API overview")
     print("="*80 + "\n")
@@ -164,12 +161,6 @@ def parse_args():
         "--save-intermediate",
         action="store_true",
         help="Write intermediate JSONL files to data/processed/.",
-    )
-    parser.add_argument(
-        "--forecast-days",
-        type=int,
-        default=14,
-        help="Forecast horizon in days for predictive forecasting (default: 14).",
     )
     parser.add_argument(
         "--no-db-load",
@@ -319,10 +310,6 @@ def main():
 
         run_step("Disruption & Impact Inference", apply_batch_disruption_and_impact, events)
 
-        if not skip_optional:
-            # --- Step 7: Predictive Forecasting ---
-            run_step("7. Predictive Forecasting", generate_all_node_forecasts, events, forecast_days=args.forecast_days)
-
         # --- Step 8: Load to Database ---
         db_loaded = False
         if args.no_db_load:
@@ -336,6 +323,20 @@ def main():
                 db_loaded = True
             else:
                 print("❌ Could not connect to database, skipping data load.")
+
+        # --- Step 9: Refresh XGBoost forecast snapshots ---
+        if not skip_optional and db_loaded:
+            print("\n▶️  9. Refreshing XGBoost forecast snapshots...")
+            try:
+                from sqlalchemy.orm import sessionmaker
+                from src.forecast_snapshots import snapshot_all_nodes_for_date, SOURCE_SCHEDULED
+                from datetime import date as _date
+                SessionLocal = sessionmaker(bind=engine)
+                with SessionLocal() as _sess:
+                    result = snapshot_all_nodes_for_date(_sess, _date.today(), source=SOURCE_SCHEDULED, method="xgboost")
+                print(f"   ✅ Snapshots saved: {result['saved']}  failed: {len(result['failed'])}")
+            except Exception as _fe:
+                print(f"   ⚠️  Forecast snapshot refresh failed (non-fatal): {_fe}")
 
         # Summary
         print_summary(forecasts_ran=not skip_optional, db_loaded=db_loaded)

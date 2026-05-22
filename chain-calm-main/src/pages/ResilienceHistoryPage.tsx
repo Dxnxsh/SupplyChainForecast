@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useEffect, useCallback, useState, type MouseEvent } from 'react';
 import { motion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { Header } from '@/components/layout/Header';
@@ -16,14 +16,15 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Area,
-  AreaChart,
   ComposedChart,
   Line,
-  Legend,
+  ReferenceLine,
 } from 'recharts';
 import { api } from '@/lib/api';
 import { mapSupplier } from '@/lib/dataMappers';
+
+const PX_PER_DAY = 72;
+const HISTORY_DAYS = 60;
 
 function isoYesterdayUtc(): string {
   const d = new Date();
@@ -31,7 +32,9 @@ function isoYesterdayUtc(): string {
   return d.toISOString().slice(0, 10);
 }
 
-type ForecastMode = 'live' | 'compare';
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
 
 export default function ResilienceHistoryPage() {
   const suppliersQuery = useQuery({
@@ -41,74 +44,162 @@ export default function ResilienceHistoryPage() {
 
   const suppliers = (suppliersQuery.data ?? []).map(mapSupplier);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string>('');
-  const [forecastMode, setForecastMode] = useState<ForecastMode>('live');
   const [snapshotDate, setSnapshotDate] = useState<string>(isoYesterdayUtc);
+  const [showOverlay, setShowOverlay] = useState(false);
 
   const effectiveSupplierId = selectedSupplierId || suppliers[0]?.id || '';
+  const selectedSupplier = suppliers.find((s) => s.id === effectiveSupplierId);
 
-  const forecastQuery = useQuery({
-    queryKey: ['forecast', 'hybrid', effectiveSupplierId],
-    queryFn: () => api.getSupplierForecast(effectiveSupplierId),
-    enabled: Boolean(effectiveSupplierId) && forecastMode === 'live',
+  const historyQuery = useQuery({
+    queryKey: ['risk-history', effectiveSupplierId],
+    queryFn: () => api.getRiskHistory(effectiveSupplierId, HISTORY_DAYS),
+    enabled: Boolean(effectiveSupplierId),
   });
 
-  const snapshotDatesQuery = useQuery({
-    queryKey: ['forecast-snapshot-dates', effectiveSupplierId],
-    queryFn: () => api.getForecastSnapshotDates(effectiveSupplierId),
-    enabled: Boolean(effectiveSupplierId) && forecastMode === 'compare',
+  const traceQuery = useQuery({
+    queryKey: ['forecast-trace', effectiveSupplierId],
+    queryFn: () => api.getForecastTrace(effectiveSupplierId, HISTORY_DAYS),
+    enabled: Boolean(effectiveSupplierId),
+  });
+
+  const forecastQuery = useQuery({
+    queryKey: ['forecast', 'xgboost', effectiveSupplierId],
+    queryFn: () => api.getSupplierForecast(effectiveSupplierId),
+    enabled: Boolean(effectiveSupplierId),
   });
 
   const snapshotQuery = useQuery({
     queryKey: ['forecast-snapshot', effectiveSupplierId, snapshotDate],
     queryFn: () => api.getForecastSnapshot(effectiveSupplierId, snapshotDate, true),
-    enabled: Boolean(effectiveSupplierId) && forecastMode === 'compare' && Boolean(snapshotDate),
+    enabled: Boolean(effectiveSupplierId) && showOverlay && Boolean(snapshotDate),
   });
 
-  const selectedSupplier = suppliers.find((s) => s.id === effectiveSupplierId);
-  const forecastData = forecastQuery.data ?? [];
+  const todayStr = todayIso();
 
-  const compareChartData = useMemo(() => {
-    const pts = snapshotQuery.data?.points ?? [];
-    return pts.map((p) => ({
-      ds: p.ds,
-      predicted: p.yhat,
-      actual: p.y_actual,
-      lower: p.yhat_lower,
-      upper: p.yhat_upper,
+  const chartData = useMemo(() => {
+    // Build a map from the trace: ds → { yhat, yhat_lower, yhat_upper }
+    const traceMap: Record<string, { yhat: number; yhat_lower: number; yhat_upper: number }> =
+      Object.fromEntries(
+        (traceQuery.data ?? []).map((p) => [p.ds, { yhat: p.yhat, yhat_lower: p.yhat_lower, yhat_upper: p.yhat_upper }])
+      );
+
+    const histRaw = (historyQuery.data ?? []).map((p) => {
+      const trace = traceMap[p.ds] ?? null;
+      return {
+        ds: p.ds,
+        y_actual: p.y_actual,
+        yhat: trace ? trace.yhat : null as number | null,
+        yhat_lower: trace ? trace.yhat_lower : null as number | null,
+        yhat_upper: trace ? trace.yhat_upper : null as number | null,
+        snapshot_yhat: null as number | null,
+        isForecast: false,
+      };
+    });
+
+    const forecastRaw = (forecastQuery.data ?? []).map((p) => ({
+      ds: typeof p.ds === 'string' ? p.ds : String(p.ds),
+      y_actual: null as number | null,
+      yhat: p.yhat,
+      yhat_lower: p.yhat_lower,
+      yhat_upper: p.yhat_upper,
+      snapshot_yhat: null as number | null,
+      isForecast: true,
     }));
-  }, [snapshotQuery.data]);
 
-  const loadingCompare =
-    forecastMode === 'compare' &&
-    Boolean(effectiveSupplierId) &&
-    (snapshotQuery.isLoading || snapshotQuery.isFetching);
+    // Bridge: if the last history point has no trace entry, anchor the purple
+    // line to the realized value so both lines meet at Today without a gap.
+    const lastHist = histRaw.length > 0 ? histRaw[histRaw.length - 1] : null;
+    if (lastHist && lastHist.yhat === null) {
+      const anchorValue = lastHist.y_actual ?? 0;
+      lastHist.yhat = anchorValue;
+      lastHist.yhat_lower = anchorValue;
+      lastHist.yhat_upper = anchorValue;
+    }
+
+    const snapshotMap: Record<string, number> = Object.fromEntries(
+      (snapshotQuery.data?.points ?? []).map((p) => [p.ds, p.yhat])
+    );
+
+    const merged = [...histRaw, ...forecastRaw].sort((a, b) => a.ds.localeCompare(b.ds));
+    return merged.map((p) => ({ ...p, snapshot_yhat: snapshotMap[p.ds] ?? null }));
+  }, [historyQuery.data, traceQuery.data, forecastQuery.data, snapshotQuery.data]);
+
+  const forecastPeak = useMemo(() => {
+    const forecastPoints = chartData.filter((p) => p.isForecast && p.yhat !== null);
+    if (!forecastPoints.length) return null;
+    return forecastPoints.reduce((max, p) => (p.yhat! > max.yhat! ? p : max));
+  }, [chartData]);
+
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef({ active: false, startX: 0, scrollLeft: 0 });
+
+  const onMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    dragRef.current = { active: true, startX: e.pageX - el.offsetLeft, scrollLeft: el.scrollLeft };
+    el.style.cursor = 'grabbing';
+    el.style.userSelect = 'none';
+  }, []);
+
+  const onMouseMove = useCallback((e: MouseEvent<HTMLDivElement>) => {
+    if (!dragRef.current.active) return;
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const x = e.pageX - el.offsetLeft;
+    const walk = (x - dragRef.current.startX) * 1.2;
+    el.scrollLeft = dragRef.current.scrollLeft - walk;
+  }, []);
+
+  const onMouseUp = useCallback(() => {
+    dragRef.current.active = false;
+    const el = scrollContainerRef.current;
+    if (el) { el.style.cursor = 'grab'; el.style.userSelect = ''; }
+  }, []);
+
+  const scrollToToday = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const todayIndex = chartData.findIndex((p) => p.ds === todayStr);
+    if (todayIndex < 0) return;
+    const targetLeft = todayIndex * PX_PER_DAY - el.clientWidth / 2 + PX_PER_DAY / 2;
+    el.scrollLeft = Math.max(0, targetLeft);
+  }, [chartData, todayStr]);
+
+  useEffect(() => {
+    scrollToToday();
+  }, [scrollToToday]);
+
+  const isLoading =
+    suppliersQuery.isLoading || historyQuery.isLoading || traceQuery.isLoading || forecastQuery.isLoading;
+
+  const hasError =
+    suppliersQuery.isError ||
+    forecastQuery.isError ||
+    (showOverlay && snapshotQuery.isError);
+
+  const chartWidth = Math.max(chartData.length * PX_PER_DAY, 800);
 
   return (
     <div className="flex-1 flex flex-col h-screen overflow-hidden">
       <Header
         title="Forecast"
-        subtitle={
-          forecastMode === 'live'
-            ? 'Hybrid supplier risk forecast (latest pipeline output)'
-            : 'XGBoost snapshot vs realized daily risk (UTC)'
-        }
+        subtitle="14-day XGBoost risk forecast — history and future on one timeline"
       />
 
       <div className="flex-1 p-6 overflow-auto">
-        {(suppliersQuery.isError ||
-          (forecastMode === 'live' && forecastQuery.isError) ||
-          (forecastMode === 'compare' && snapshotQuery.isError)) && (
+        {hasError && (
           <div className="mb-4 rounded-lg border border-risk-high/40 bg-risk-high/10 px-4 py-3 text-sm text-risk-high">
             Could not load forecast data from the backend.
-            {forecastMode === 'compare' && snapshotQuery.isError && (
+            {showOverlay && snapshotQuery.isError && (
               <span className="block mt-1 text-xs opacity-90">
-                For compare mode, pick a date with at least two days of historical risk_score for this
-                node, or wait for on-demand generation to finish.
+                For the compare overlay, pick a date with at least two days of historical
+                risk_score for this node, or wait for on-demand generation to finish.
               </span>
             )}
           </div>
         )}
 
+        {/* Controls */}
         <div className="flex flex-wrap items-center gap-4 mb-6">
           <span className="text-sm text-muted-foreground">Select Supplier:</span>
           <Select value={effectiveSupplierId} onValueChange={setSelectedSupplierId}>
@@ -124,52 +215,39 @@ export default function ResilienceHistoryPage() {
             </SelectContent>
           </Select>
 
-          <div className="flex rounded-lg border border-border overflow-hidden">
+          <Button variant="outline" size="sm" onClick={scrollToToday}>
+            Today
+          </Button>
+
+          <div className="flex items-center gap-2 ml-auto">
             <Button
               type="button"
-              variant={forecastMode === 'live' ? 'secondary' : 'ghost'}
+              variant={showOverlay ? 'secondary' : 'ghost'}
               size="sm"
-              className="rounded-none"
-              onClick={() => setForecastMode('live')}
+              onClick={() => setShowOverlay((v) => !v)}
             >
-              Live (hybrid)
+              {showOverlay ? 'Hide overlay' : 'Compare snapshot'}
             </Button>
-            <Button
-              type="button"
-              variant={forecastMode === 'compare' ? 'secondary' : 'ghost'}
-              size="sm"
-              className="rounded-none border-l border-border"
-              onClick={() => setForecastMode('compare')}
-            >
-              Compare snapshot
-            </Button>
+            {showOverlay && (
+              <>
+                <span className="text-sm text-muted-foreground">Origin:</span>
+                <input
+                  type="date"
+                  className="h-9 rounded-md border border-border bg-secondary/50 px-3 text-sm text-foreground"
+                  value={snapshotDate}
+                  max={todayStr}
+                  onChange={(e) => setSnapshotDate(e.target.value)}
+                />
+              </>
+            )}
           </div>
 
-          {forecastMode === 'compare' && (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Forecast origin:</span>
-              <input
-                type="date"
-                className="h-9 rounded-md border border-border bg-secondary/50 px-3 text-sm text-foreground"
-                value={snapshotDate}
-                max={new Date().toISOString().slice(0, 10)}
-                onChange={(e) => setSnapshotDate(e.target.value)}
-              />
-              {snapshotDatesQuery.data?.dates?.length ? (
-                <span className="text-xs text-muted-foreground max-w-[200px] truncate" title={snapshotDatesQuery.data.dates.join(', ')}>
-                  Stored: {snapshotDatesQuery.data.dates.length} day(s)
-                </span>
-              ) : null}
-            </div>
-          )}
-
-          {(suppliersQuery.isLoading ||
-            (forecastMode === 'live' && forecastQuery.isLoading) ||
-            loadingCompare) && (
+          {isLoading && (
             <span className="text-sm text-muted-foreground">Loading…</span>
           )}
         </div>
 
+        {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -177,185 +255,206 @@ export default function ResilienceHistoryPage() {
             className="glass-card rounded-xl p-5"
           >
             <p className="text-sm text-muted-foreground">Current exposure (live)</p>
-            <p className="text-3xl font-bold text-risk-high mt-1">{selectedSupplier?.riskScore}%</p>
+            <p className="text-3xl font-bold text-risk-high mt-1">
+              {selectedSupplier?.riskScore}%
+            </p>
           </motion.div>
+
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
             className="glass-card rounded-xl p-5"
           >
-            <p className="text-sm text-muted-foreground">Criticality</p>
-            <p className="text-3xl font-bold text-risk-low mt-1">{selectedSupplier?.criticality}</p>
+            <p className="text-sm text-muted-foreground">Forecast peak</p>
+            {forecastPeak ? (
+              <>
+                <p className="text-3xl font-bold text-primary mt-1">
+                  {forecastPeak.yhat!.toFixed(1)}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">{forecastPeak.ds}</p>
+              </>
+            ) : (
+              <p className="text-3xl font-bold text-muted-foreground mt-1">—</p>
+            )}
           </motion.div>
+
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
             className="glass-card rounded-xl p-5"
           >
-            {forecastMode === 'live' ? (
-              <>
-                <p className="text-sm text-muted-foreground">Forecast points</p>
-                <p className="text-3xl font-bold text-primary mt-1">{forecastData.length}</p>
-              </>
-            ) : (
-              <>
-                <p className="text-sm text-muted-foreground">MAE (completed days)</p>
-                <p className="text-3xl font-bold text-primary mt-1">
-                  {snapshotQuery.data?.mae != null ? snapshotQuery.data.mae.toFixed(2) : '—'}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {snapshotQuery.data?.completed_days ?? 0} / {snapshotQuery.data?.horizon_days ?? 14} days
-                  {snapshotQuery.data?.generated_on_demand ? ' · computed on demand' : ''}
-                </p>
-              </>
+            <p className="text-sm text-muted-foreground">MAE (snapshot overlay)</p>
+            <p className="text-3xl font-bold text-primary mt-1">
+              {snapshotQuery.data?.mae != null ? snapshotQuery.data.mae.toFixed(2) : '—'}
+            </p>
+            {snapshotQuery.data && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {snapshotQuery.data.completed_days} / {snapshotQuery.data.horizon_days} days
+                {snapshotQuery.data.generated_on_demand ? ' · computed on demand' : ''}
+              </p>
             )}
           </motion.div>
         </div>
 
-        <div className="grid grid-cols-1 gap-6">
-          <motion.div
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="glass-card rounded-xl p-5"
-          >
-            <h3 className="text-lg font-semibold text-foreground mb-4">
-              {forecastMode === 'live' ? '14-Day Hybrid Forecast' : 'Snapshot vs actual (daily sum of risk_score)'}
+        {/* Chart */}
+        <motion.div
+          initial={{ opacity: 0, scale: 0.98 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="glass-card rounded-xl p-5"
+        >
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-foreground">
+              Risk Timeline — scroll left for history, right for forecast
             </h3>
-            <div className="h-80">
-              {forecastMode === 'live' ? (
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={forecastData}>
-                    <defs>
-                      <linearGradient id="histGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(250, 60%, 60%)" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="hsl(250, 60%, 60%)" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="newsGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="hsl(0, 84%, 60%)" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="hsl(0, 84%, 60%)" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(217, 33%, 18%)" vertical={false} />
-                    <XAxis
-                      dataKey="ds"
-                      stroke="hsl(215, 20%, 55%)"
-                      tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 12 }}
-                      tickFormatter={(value) => String(value).slice(5)}
-                      tickLine={false}
-                      axisLine={false}
-                      dy={10}
-                    />
-                    <YAxis
-                      stroke="hsl(215, 20%, 55%)"
-                      tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 12 }}
-                      domain={[0, 100]}
-                      tickLine={false}
-                      axisLine={false}
-                      dx={-10}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(222, 47%, 10%)',
-                        border: '1px solid hsl(217, 33%, 18%)',
-                        borderRadius: '8px',
-                        color: 'hsl(210, 40%, 98%)',
-                      }}
-                      itemStyle={{ color: 'hsl(210, 40%, 98%)' }}
-                      labelStyle={{ color: 'hsl(215, 20%, 65%)', marginBottom: '8px' }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="historical_contribution"
-                      name="Historical trend"
-                      stackId="1"
-                      stroke="hsl(250, 60%, 60%)"
-                      fill="url(#histGradient)"
-                      strokeWidth={2}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="news_contribution"
-                      name="Predictive news"
-                      stackId="1"
-                      stroke="hsl(0, 84%, 60%)"
-                      fill="url(#newsGradient)"
-                      strokeWidth={2}
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={compareChartData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="hsl(217, 33%, 18%)" vertical={false} />
-                    <XAxis
-                      dataKey="ds"
-                      stroke="hsl(215, 20%, 55%)"
-                      tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 12 }}
-                      tickFormatter={(value) => String(value).slice(5)}
-                      tickLine={false}
-                      axisLine={false}
-                      dy={10}
-                    />
-                    <YAxis
-                      stroke="hsl(215, 20%, 55%)"
-                      tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 12 }}
-                      domain={[0, 'auto']}
-                      tickLine={false}
-                      axisLine={false}
-                      dx={-10}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: 'hsl(222, 47%, 10%)',
-                        border: '1px solid hsl(217, 33%, 18%)',
-                        borderRadius: '8px',
-                        color: 'hsl(210, 40%, 98%)',
-                      }}
-                    />
-                    <Legend />
-                    <Line
-                      type="monotone"
-                      dataKey="lower"
-                      name="Predicted lower"
-                      stroke="hsl(250, 60%, 40%)"
-                      strokeWidth={1}
-                      strokeDasharray="4 4"
-                      dot={false}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="upper"
-                      name="Predicted upper"
-                      stroke="hsl(250, 60%, 40%)"
-                      strokeWidth={1}
-                      strokeDasharray="4 4"
-                      dot={false}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="predicted"
-                      name="Predicted (XGBoost snapshot)"
-                      stroke="hsl(250, 60%, 60%)"
-                      strokeWidth={2}
-                      dot={false}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="actual"
-                      name="Realized Σ risk_score"
-                      stroke="hsl(142, 70%, 45%)"
-                      strokeWidth={2}
-                      connectNulls
-                      dot={{ r: 3 }}
-                    />
-                  </ComposedChart>
-                </ResponsiveContainer>
+            {/* Static legend outside the scrollable area */}
+            <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
+              <span className="flex items-center gap-1.5">
+                <span style={{ display: 'inline-block', width: 16, height: 2, background: 'hsl(142, 70%, 45%)', borderRadius: 1 }} />
+                Realized avg risk
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span style={{ display: 'inline-block', width: 16, height: 2, background: 'hsl(250, 60%, 60%)', borderRadius: 1 }} />
+                Predicted (XGBoost)
+              </span>
+              {showOverlay && (
+                <span className="flex items-center gap-1.5">
+                  <span style={{ display: 'inline-block', width: 16, height: 2, background: 'hsl(30, 80%, 55%)', borderRadius: 1, borderTop: '2px dashed hsl(30, 80%, 55%)' }} />
+                  Snapshot ({snapshotDate})
+                </span>
               )}
             </div>
-          </motion.div>
-        </div>
+          </div>
+
+          <div
+            ref={scrollContainerRef}
+            style={{ overflowX: 'auto', width: '100%', cursor: 'grab' }}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseUp}
+          >
+            <div style={{ width: chartWidth, height: 320 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chartData} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke="hsl(217, 33%, 18%)"
+                    vertical={false}
+                  />
+                  <XAxis
+                    dataKey="ds"
+                    stroke="hsl(215, 20%, 55%)"
+                    tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 11 }}
+                    tickFormatter={(v) => String(v).slice(5)}
+                    tickLine={false}
+                    axisLine={false}
+                    dy={8}
+                    interval={2}
+                  />
+                  <YAxis
+                    stroke="hsl(215, 20%, 55%)"
+                    tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 11 }}
+                    domain={[0, 'auto']}
+                    tickLine={false}
+                    axisLine={false}
+                    dx={-8}
+                    width={40}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: 'hsl(222, 47%, 10%)',
+                      border: '1px solid hsl(217, 33%, 18%)',
+                      borderRadius: '8px',
+                      color: 'hsl(210, 40%, 98%)',
+                    }}
+                    itemStyle={{ color: 'hsl(210, 40%, 98%)' }}
+                    labelStyle={{ color: 'hsl(215, 20%, 65%)', marginBottom: '6px' }}
+                    formatter={(value: number | null, name: string) =>
+                      value != null ? [value.toFixed(2), name] : [null, name]
+                    }
+                  />
+
+                  {/* Realized history — green */}
+                  <Line
+                    type="monotone"
+                    dataKey="y_actual"
+                    name="Realized avg risk"
+                    stroke="hsl(142, 70%, 45%)"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                  />
+
+                  {/* XGBoost predicted — purple (runs through history AND future) */}
+                  <Line
+                    type="monotone"
+                    dataKey="yhat"
+                    name="Predicted (XGBoost)"
+                    stroke="hsl(250, 60%, 60%)"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                  />
+
+                  {/* Confidence bound lines — dotted */}
+                  <Line
+                    type="monotone"
+                    dataKey="yhat_upper"
+                    name="Upper bound"
+                    stroke="hsl(250, 60%, 60%)"
+                    strokeWidth={1}
+                    strokeDasharray="3 3"
+                    strokeOpacity={0.5}
+                    dot={false}
+                    legendType="none"
+                    connectNulls={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="yhat_lower"
+                    name="Lower bound"
+                    stroke="hsl(250, 60%, 60%)"
+                    strokeWidth={1}
+                    strokeDasharray="3 3"
+                    strokeOpacity={0.5}
+                    dot={false}
+                    legendType="none"
+                    connectNulls={false}
+                  />
+
+                  {/* Compare overlay */}
+                  {showOverlay && (
+                    <Line
+                      type="monotone"
+                      dataKey="snapshot_yhat"
+                      name={`Snapshot (${snapshotDate})`}
+                      stroke="hsl(30, 80%, 55%)"
+                      strokeWidth={1.5}
+                      strokeDasharray="5 3"
+                      dot={false}
+                      connectNulls
+                    />
+                  )}
+
+                  {/* Today marker */}
+                  <ReferenceLine
+                    x={todayStr}
+                    stroke="hsl(215, 20%, 55%)"
+                    strokeDasharray="3 3"
+                    label={{
+                      value: 'Today',
+                      position: 'insideTopRight',
+                      fill: 'hsl(215, 20%, 65%)',
+                      fontSize: 11,
+                    }}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </motion.div>
       </div>
     </div>
   );

@@ -222,7 +222,7 @@ export default function ResilienceHistoryPage() {
           <div className="flex items-center gap-2 ml-auto">
             <Button
               type="button"
-              variant={showOverlay ? 'secondary' : 'ghost'}
+              variant={showOverlay ? 'secondary' : 'outline'}
               size="sm"
               onClick={() => setShowOverlay((v) => !v)}
             >

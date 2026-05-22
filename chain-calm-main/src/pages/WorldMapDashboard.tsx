@@ -203,7 +203,13 @@ export default function WorldMapDashboard() {
                 type="date"
                 className="h-9 rounded-md border border-border bg-secondary/50 px-3 text-sm text-foreground"
                 value={rewindDate}
-                max={new Date().toISOString().slice(0, 10)}
+                max={(() => {
+                  const d = new Date();
+                  const year = d.getFullYear();
+                  const month = String(d.getMonth() + 1).padStart(2, '0');
+                  const day = String(d.getDate()).padStart(2, '0');
+                  return `${year}-${month}-${day}`;
+                })()}
                 onChange={(e) => setRewindDate(e.target.value)}
               />
               <Button

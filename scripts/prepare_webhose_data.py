@@ -53,7 +53,7 @@ def parse_zip_date(filename: str) -> Optional[datetime]:
 
 
 def extract_articles_from_zip(file_obj) -> list[dict]:
-    """Read all article_*.json files from an open zip file object. Skips invalid JSON."""
+    """Read all .json files from an open zip file object. Skips invalid JSON."""
     articles = []
     with zipfile.ZipFile(file_obj) as zf:
         for name in zf.namelist():
@@ -63,7 +63,7 @@ def extract_articles_from_zip(file_obj) -> list[dict]:
                 data = json.loads(zf.read(name).decode("utf-8", errors="replace"))
                 if isinstance(data, dict):
                     articles.append(data)
-            except (json.JSONDecodeError, Exception):
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 pass
     return articles
 

@@ -110,8 +110,12 @@ def test_parse_zip_date_financial():
     assert parse_zip_date("Financial and Economic News_negative_20250119072618.zip") == datetime(2025, 1, 19, tzinfo=timezone.utc)
 
 
-def test_parse_zip_date_pre2025_returns_none():
+def test_parse_zip_date_pre2025_still_parses():
     assert parse_zip_date("Politics_negative_20241231070219.zip") == datetime(2024, 12, 31, tzinfo=timezone.utc)
+
+
+def test_parse_zip_date_no_match_returns_none():
+    assert parse_zip_date("random_file.txt") is None
 
 
 def test_extract_articles_from_zip_returns_dicts():

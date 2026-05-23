@@ -56,7 +56,7 @@ venv311/bin/python -m src.temporal_extraction
 venv311/bin/python -m src.predictive_forecasting
 venv311/bin/python -m src.load_to_db
 
-# spaCy (first run)
+# spaCy (first run — used for temporal date extraction only, not NER)
 venv311/bin/python -m spacy download en_core_web_sm
 ```
 
@@ -101,6 +101,7 @@ Also: `label_with_openrouter.py`, `label_data.py`. Default artifact paths are in
 | `USE_FINBERT_RISK` | `1` (default) | FinBERT for batch sentiment + RSS `sentiment_*`; `0` / `false` / `off` → VADER (batch) and skip FinBERT in RSS enrichment |
 | `FINBERT_MODEL` | `ProsusAI/finbert` | Transformers model id |
 | `FINBERT_DEVICE` | auto | `cpu`, `cuda`, or `mps` to force device |
+| `GLINER_MODEL` | `fastino/gliner2-large-v1` | GLiNER2 model ID for location NER extraction (`src/preprocessing.py`) |
 | `RSS_FEEDS_PATH` | `config/rss_feeds.json` | JSON array of `{ "url", "source" }`; copy from `config/rss_feeds.example.json` |
 | `ML_CLASSIFIER_PATH` | `model_training/classifier.pkl` | 3-tuple `(vectorizer, XGBClassifier, LabelEncoder)`; legacy 2-tuple still loads |
 | `DISRUPTION_CLASSIFIER_PATH` | `model_training/disruption_classifier.pkl` | XGBoost binary disruption; `predicted_disruption_probability` |
@@ -118,7 +119,7 @@ Each step may write JSONL under `data/processed/` when you opt in to save interm
 
 ```
 data/raw/web_scrape/*.json
-  → src/preprocessing.py          TF-IDF + XGBoost headline labels, NER, event types → processed_events.jsonl
+  → src/preprocessing.py          TF-IDF + XGBoost headline labels, GLiNER2 NER (locations), event types → processed_events.jsonl
   → src/filter_events.py          filtered_events.jsonl
   → src/risk_scoring.py           FinBERT (default) or VADER sentiment + heuristic risk → scored_events.jsonl; sets sentiment_label / sentiment_score
   → src/geocoding.py              geocoded_events.jsonl

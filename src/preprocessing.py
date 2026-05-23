@@ -9,7 +9,7 @@ import warnings
 import gc
 import torch
 from langdetect import detect
-from transformers import pipeline
+from gliner2 import GLiNER2
 
 # Import default user agent from config
 #from config.config import DEFAULT_USER_AGENT
@@ -17,6 +17,8 @@ from transformers import pipeline
 # --- Performance Configuration ---
 NER_BATCH_SIZE = int(os.getenv("NER_BATCH_SIZE", "32"))
 ML_CLASSIFIER_PATH = os.getenv("ML_CLASSIFIER_PATH", "model_training/classifier.pkl")
+_GLINER_MODEL_ID = os.getenv("GLINER_MODEL", "fastino/gliner2-large-v1")
+_GLINER_LABEL = "location"
 PROGRESS_EVERY_DOCS = int(os.getenv("PREPROCESS_PROGRESS_EVERY_DOCS", "25"))
 # Incremented when NER raises (e.g. HIP/CUDA kernel mismatch); see end-of-run summary.
 _NER_BATCH_EXCEPTIONS = 0
@@ -82,27 +84,21 @@ def load_ml_classifier(model_path=ML_CLASSIFIER_PATH):
 # --- Global NLP Model Initialization ---
 # This section defines lazy loading for models.
 
-_ner_pipeline = None
+_gliner_model = None
 
 def get_ner_pipeline():
-    """Lazily load the Hugging Face NER pipeline."""
-    global _ner_pipeline
-    if _ner_pipeline is None:
+    """Lazily load the GLiNER2 model for zero-shot NER."""
+    global _gliner_model
+    if _gliner_model is None:
         try:
             ner_device, ner_device_name = _select_torch_device()
-            print("Loading Hugging Face NER model (dbmdz/bert-large-cased-finetuned-conll03-english)...")
-            from transformers import pipeline
-            _ner_pipeline = pipeline(
-                "ner",
-                model="dbmdz/bert-large-cased-finetuned-conll03-english",
-                aggregation_strategy="simple",
-                device=ner_device,
-                truncation=True,
-                max_length=256,
-            )
+            print(f"Loading GLiNER2 model ({_GLINER_MODEL_ID})...")
+            model = GLiNER2.from_pretrained(_GLINER_MODEL_ID)
+            model = model.to(ner_device)
+            _gliner_model = model
             if ner_device_name == "mps":
                 print(
-                    f"Hugging Face NER model loaded on Apple Metal (MPS) with batch size {NER_BATCH_SIZE}. "
+                    f"GLiNER2 model loaded on Apple Metal (MPS) with batch size {NER_BATCH_SIZE}. "
                     "If you see errors, try: export PYTORCH_ENABLE_MPS_FALLBACK=1"
                 )
             elif ner_device_name == "cuda" and torch.cuda.is_available():
@@ -110,43 +106,32 @@ def get_ner_pipeline():
                     dev = torch.cuda.get_device_name(0)
                 except Exception:
                     dev = "cuda:0"
-                print(
-                    f"Hugging Face NER model loaded on CUDA/HIP ({dev}) with batch size {NER_BATCH_SIZE}."
-                )
+                print(f"GLiNER2 model loaded on CUDA/HIP ({dev}) with batch size {NER_BATCH_SIZE}.")
             else:
-                print(f"Hugging Face NER model loaded on {ner_device_name.upper()} with batch size {NER_BATCH_SIZE}.")
-                print(
-                    "   ℹ️  Throughput here is driven by this NER model, not FinBERT (that runs later in risk scoring). "
-                    "CPU NER is often several times slower than GPU; check TORCH_DEVICE / PyTorch ROCm if you expect GPU.",
-                    flush=True,
-                )
+                print(f"GLiNER2 model loaded on {ner_device_name.upper()} with batch size {NER_BATCH_SIZE}.")
         except Exception as e:
-            print(f"❌ Error loading Hugging Face NER model: {e}")
-            print("Check internet connection and ensure `transformers` and `torch` are installed.")
+            print(f"❌ Error loading GLiNER2 model: {e}")
+            print("Check internet connection and ensure `gliner2` and `torch` are installed.")
             raise e
-    return _ner_pipeline
+    return _gliner_model
+
 
 def unload_ner():
-    """Clear the NER pipeline from RAM and trigger garbage collection."""
-    global _ner_pipeline
-    if _ner_pipeline is not None:
-        print("📉 Unloading NER model from RAM...")
-        # Explicitly clear internal references to help GC
+    """Clear the GLiNER2 model from RAM and trigger garbage collection."""
+    global _gliner_model
+    if _gliner_model is not None:
+        print("📉 Unloading GLiNER2 model from RAM...")
         try:
-            if hasattr(_ner_pipeline, "model"):
-                _ner_pipeline.model.to("cpu")
-                del _ner_pipeline.model
-            if hasattr(_ner_pipeline, "tokenizer"):
-                del _ner_pipeline.tokenizer
+            _gliner_model.to("cpu")
         except Exception:
             pass
-            
-        _ner_pipeline = None
-        
-        # Multiple GC passes
+
+        del _gliner_model
+        _gliner_model = None
+
         gc.collect()
         gc.collect()
-        
+
         try:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -283,27 +268,25 @@ def detect_potential_events(text, title=""):
     return list(set(detected_events))
 
 def extract_locations_batch(texts):
-    """Extract location entities for a list of texts using batched inference."""
+    """Extract location entities for a list of texts using GLiNER2 batched inference."""
     if not texts:
         return []
     try:
-        pipe = get_ner_pipeline()
+        model = get_ner_pipeline()
         from tqdm import tqdm
-        
-        def gen():
-            for t in texts:
-                yield t or ""
 
-        # Process results on-the-fly to avoid accumulating 179k entity dicts in RAM,
-        # which caused GC pressure and throughput degradation over long runs.
+        labels = [_GLINER_LABEL]
+
         all_locations = []
-        for entities in tqdm(
-            pipe(gen(), batch_size=NER_BATCH_SIZE),
-            total=len(texts),
+        for i in tqdm(
+            range(0, len(texts), NER_BATCH_SIZE),
             desc="Step 2/5: Extracting Locations (NER)",
         ):
-            locations = [entity['word'] for entity in entities if entity.get('entity_group') == 'LOC']
-            all_locations.append(list(set(locations)))
+            batch = [t or "" for t in texts[i:i + NER_BATCH_SIZE]]
+            batch_results = model.batch_extract_entities(batch, labels)
+            for result in batch_results:
+                locs = result.get("entities", {}).get(_GLINER_LABEL, [])
+                all_locations.append(locs)
         return all_locations
     except Exception as e:
         global _NER_BATCH_EXCEPTIONS
@@ -311,10 +294,9 @@ def extract_locations_batch(texts):
         if not getattr(extract_locations_batch, "_warned", False):
             extract_locations_batch._warned = True
             warnings.warn(
-                f"NER location extraction failed for a batch ({e!s}). "
-                "Returning empty locations for those paragraphs (common if GPU/HIP errors); "
-                "geocoding can still run the pipeline using text-only node matching. "
-                "Set TORCH_DEVICE=cpu if you need stable NER on AMD ROCm.",
+                f"GLiNER2 location extraction failed for a batch ({e!s}). "
+                "Returning empty locations for those paragraphs. "
+                "Set TORCH_DEVICE=cpu if you see GPU errors.",
                 UserWarning,
                 stacklevel=2,
             )

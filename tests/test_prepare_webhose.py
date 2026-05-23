@@ -315,3 +315,29 @@ def test_iter_webhose_repo_processes_zip(tmp_path):
     assert len(entries) == 1
     assert len(sidecars) == 1
     assert sidecars[0]["dataset_source"] == "webhose_political"
+
+
+# ── _event_types_from_webhose_meta tests (Task 6) ─────────────────────────────
+
+def test_event_types_from_webhose_meta_maps_categories():
+    from src.rss_ingest import _event_types_from_webhose_meta
+    result = _event_types_from_webhose_meta({"categories": ["Politics", "Economy, Business and Finance"]})
+    assert "Political_Regulatory" in result
+    assert "Demand_Supply_Shift" in result
+
+
+def test_event_types_from_webhose_meta_deduplicates():
+    from src.rss_ingest import _event_types_from_webhose_meta
+    result = _event_types_from_webhose_meta({"categories": ["Politics", "Politics->government"]})
+    assert result.count("Political_Regulatory") == 1
+
+
+def test_event_types_from_webhose_meta_none_returns_empty():
+    from src.rss_ingest import _event_types_from_webhose_meta
+    assert _event_types_from_webhose_meta(None) == []
+
+
+def test_event_types_from_webhose_meta_unknown_category_ignored():
+    from src.rss_ingest import _event_types_from_webhose_meta
+    result = _event_types_from_webhose_meta({"categories": ["UnknownCategory"]})
+    assert result == []

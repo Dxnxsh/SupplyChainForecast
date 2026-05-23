@@ -221,84 +221,104 @@ def write_combined(
         print(f"  ✅ Wrote {len(clean_entries):,} articles → {filename.name}")
 
 
+def write_sidecar(sidecars: list[dict], out_dir: Path) -> None:
+    """Write webhose_metadata.jsonl — one line per article."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "webhose_metadata.jsonl"
+    with out_path.open("w", encoding="utf-8") as f:
+        for rec in sidecars:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    print(f"  Wrote {len(sidecars):,} sidecar records -> {out_path.name}")
+
+
+def iter_webhose_repo(repo_dir: Path, dataset_source: str) -> tuple[list[dict], list[dict]]:
+    """
+    Walk repo_dir/Datasets/*.zip, extract 2025+ English articles.
+    Returns (pipeline_entries, sidecars).
+    """
+    datasets_dir = repo_dir / "Datasets"
+    if not datasets_dir.exists():
+        print(f"  No Datasets/ folder found in {repo_dir}")
+        return [], []
+
+    all_entries: list[dict] = []
+    all_sidecars: list[dict] = []
+    zip_files = sorted(datasets_dir.glob("*.zip"))
+    print(f"  Found {len(zip_files)} zip files in {datasets_dir}")
+
+    for zip_path in zip_files:
+        zip_date = parse_zip_date(zip_path.name)
+        if zip_date is None or zip_date < CUTOFF:
+            continue
+        try:
+            articles = extract_articles_from_zip(zip_path.open("rb"))
+        except Exception as exc:
+            print(f"  Failed to open {zip_path.name}: {exc}")
+            continue
+        for article in articles:
+            result = normalize_article(article, dataset_source)
+            if result is None:
+                continue
+            entry, sidecar = result
+            all_entries.append(entry)
+            all_sidecars.append(sidecar)
+
+    print(f"  -> {len(all_entries):,} valid articles from {dataset_source}")
+    return all_entries, all_sidecars
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Prepare Webhose datasets for pipeline ingestion.")
+    parser = argparse.ArgumentParser(
+        description="Prepare Webhose datasets for supply chain pipeline ingestion."
+    )
     parser.add_argument(
         "--political-repo",
         default=str(PROJECT_ROOT / "data" / "raw" / "webhose_political"),
-        help="Path to Webhose political news repo directory",
+        help="Path to cloned Webhose political-news-dataset repo",
     )
     parser.add_argument(
         "--financial-repo",
         default=str(PROJECT_ROOT / "data" / "raw" / "webhose_financial"),
-        help="Path to Webhose financial news repo directory",
+        help="Path to cloned Webhose financial-news-dataset repo",
     )
     parser.add_argument(
-        "--output-dir",
+        "--scrape-dir",
+        default=str(PROJECT_ROOT / "data" / "raw" / "web_scrape"),
+        help="Existing web_scrape directory to merge with",
+    )
+    parser.add_argument(
+        "--out-dir",
         default=str(PROJECT_ROOT / "data" / "raw" / "combined"),
-        help="Output directory for normalized JSON files",
+        help="Output directory for combined quarterly files",
     )
     args = parser.parse_args()
 
-    repos = [
-        (Path(args.political_repo), "webhose_political"),
-        (Path(args.financial_repo), "webhose_financial"),
-    ]
+    political_dir = Path(args.political_repo)
+    financial_dir = Path(args.financial_repo)
+    scrape_dir = Path(args.scrape_dir)
+    out_dir = Path(args.out_dir)
 
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    print("=== Phase 1+2: Extracting and normalizing Webhose articles ===")
+    pol_entries, pol_sidecars = iter_webhose_repo(political_dir, "webhose_political")
+    fin_entries, fin_sidecars = iter_webhose_repo(financial_dir, "webhose_financial")
+    webhose_entries = pol_entries + fin_entries
+    all_sidecars = pol_sidecars + fin_sidecars
+    print(f"Total Webhose articles: {len(webhose_entries):,}")
 
-    for repo_path, dataset_source in repos:
-        if not repo_path.exists():
-            print(f"[SKIP] Repo not found: {repo_path}")
-            continue
+    print("\n=== Phase 3: Loading web_scrape and merging ===")
+    scrape_entries = load_web_scrape_entries(scrape_dir)
+    print(f"Existing web_scrape articles: {len(scrape_entries):,}")
+    merged = merge_entries(scrape_entries, webhose_entries)
+    print(f"Merged total (after dedup): {len(merged):,}")
 
-        entries = []
-        skipped = 0
+    print("\n=== Phase 4: Grouping by quarter and writing combined files ===")
+    groups = group_by_quarter(merged)
+    write_combined(groups, out_dir)
 
-        json_files = list(repo_path.rglob("*.json"))
-        zip_files = list(repo_path.rglob("*.zip"))
+    print("\n=== Phase 5: Writing metadata sidecar ===")
+    write_sidecar(all_sidecars, out_dir)
 
-        def process_article(article_dict: dict) -> None:
-            nonlocal skipped
-            result = normalize_article(article_dict, dataset_source)
-            if result is None:
-                skipped += 1
-            else:
-                entries.append(result[0])
-
-        for jf in json_files:
-            try:
-                with open(jf, encoding="utf-8") as f:
-                    data = json.load(f)
-                if isinstance(data, list):
-                    for item in data:
-                        process_article(item)
-                elif isinstance(data, dict):
-                    process_article(data)
-            except Exception as e:
-                print(f"[WARN] Failed to read {jf}: {e}")
-
-        for zf in zip_files:
-            try:
-                with zipfile.ZipFile(zf) as z:
-                    for name in z.namelist():
-                        if name.endswith(".json"):
-                            with z.open(name) as f:
-                                data = json.load(f)
-                            if isinstance(data, list):
-                                for item in data:
-                                    process_article(item)
-                            elif isinstance(data, dict):
-                                process_article(data)
-            except Exception as e:
-                print(f"[WARN] Failed to read {zf}: {e}")
-
-        out_file = output_dir / f"{dataset_source}_normalized.json"
-        with open(out_file, "w", encoding="utf-8") as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
-
-        print(f"[{dataset_source}] Written {len(entries)} articles to {out_file} (skipped {skipped})")
+    print(f"\nDone. Combined files in: {out_dir}")
 
 
 if __name__ == "__main__":

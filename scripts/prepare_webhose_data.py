@@ -38,6 +38,35 @@ CATEGORY_EVENT_MAP: dict[str, str] = {
     "Manufacturing": "Industrial_Accident",
 }
 
+_ZIP_DATE_RE = re.compile(r"(\d{8})\d{6}\.zip$")
+
+
+def parse_zip_date(filename: str) -> Optional[datetime]:
+    """Extract the date from a Webhose zip filename. Returns UTC datetime or None."""
+    m = _ZIP_DATE_RE.search(filename)
+    if not m:
+        return None
+    try:
+        return datetime.strptime(m.group(1), "%Y%m%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def extract_articles_from_zip(file_obj) -> list[dict]:
+    """Read all article_*.json files from an open zip file object. Skips invalid JSON."""
+    articles = []
+    with zipfile.ZipFile(file_obj) as zf:
+        for name in zf.namelist():
+            if not name.endswith(".json"):
+                continue
+            try:
+                data = json.loads(zf.read(name).decode("utf-8", errors="replace"))
+                if isinstance(data, dict):
+                    articles.append(data)
+            except (json.JSONDecodeError, Exception):
+                pass
+    return articles
+
 
 def _parse_utc(ts: str) -> Optional[datetime]:
     """Parse ISO 8601 timestamp string → UTC-aware datetime. Returns None on failure."""

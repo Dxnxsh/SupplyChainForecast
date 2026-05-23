@@ -253,3 +253,25 @@ def test_group_by_quarter_counts():
     grouped = group_by_quarter([Q1_ENTRY, Q2_ENTRY, Q3_ENTRY, Q4_ENTRY, Q1_2026])
     assert len(grouped[(2025, 1)]) == 1
     assert len(grouped[(2026, 1)]) == 1
+
+
+def test_write_combined_creates_quarterly_files(tmp_path):
+    from scripts.prepare_webhose_data import write_combined
+    groups = {
+        (2025, 1): [Q1_ENTRY],
+        (2025, 3): [Q3_ENTRY, {**Q3_ENTRY, "label": "a.com;T;https://a.com/33;2025-09-01T00:00:00+00:00"}],
+    }
+    write_combined(groups, tmp_path)
+    assert (tmp_path / "all_news_2025_q1.json").exists()
+    assert (tmp_path / "all_news_2025_q3.json").exists()
+    q1 = json.loads((tmp_path / "all_news_2025_q1.json").read_text())
+    assert len(q1) == 1
+    assert list(q1[0].keys()) == ["label", "text"]  # webhose_meta stripped
+
+
+def test_write_combined_strips_webhose_meta(tmp_path):
+    from scripts.prepare_webhose_data import write_combined
+    entry_with_meta = {**Q1_ENTRY, "webhose_meta": {"locations": ["Taiwan"], "categories": ["Politics"]}}
+    write_combined({(2025, 1): [entry_with_meta]}, tmp_path)
+    written = json.loads((tmp_path / "all_news_2025_q1.json").read_text())
+    assert "webhose_meta" not in written[0]

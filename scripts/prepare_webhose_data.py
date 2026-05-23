@@ -216,7 +216,7 @@ def write_combined(
     for (year, quarter), entries in sorted(groups.items()):
         filename = out_dir / f"all_news_{year}_q{quarter}.json"
         # Strip webhose_meta — pipeline only needs label + text
-        clean_entries = [{"label": e["label"], "text": e["text"]} for e in entries]
+        clean_entries = [{"label": e["label"], "text": e["text"]} for e in entries if e.get("label") and "text" in e]
         filename.write_text(json.dumps(clean_entries, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"  ✅ Wrote {len(clean_entries):,} articles → {filename.name}")
 

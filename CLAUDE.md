@@ -101,7 +101,7 @@ Also: `label_with_openrouter.py`, `label_data.py`. Default artifact paths are in
 | `USE_FINBERT_RISK` | `1` (default) | FinBERT for batch sentiment + RSS `sentiment_*`; `0` / `false` / `off` → VADER (batch) and skip FinBERT in RSS enrichment |
 | `FINBERT_MODEL` | `ProsusAI/finbert` | Transformers model id |
 | `FINBERT_DEVICE` | auto | `cpu`, `cuda`, or `mps` to force device |
-| `GLINER_MODEL` | `fastino/gliner2-large-v1` | GLiNER2 model ID for location NER extraction (`src/preprocessing.py`) |
+| `GLINER_MODEL` | `fastino/gliner2-base-v1` | GLiNER2 model ID for location NER extraction (`src/preprocessing.py`) |
 | `RSS_FEEDS_PATH` | `config/rss_feeds.json` | JSON array of `{ "url", "source" }`; copy from `config/rss_feeds.example.json` |
 | `ML_CLASSIFIER_PATH` | `model_training/classifier.pkl` | 3-tuple `(vectorizer, XGBClassifier, LabelEncoder)`; legacy 2-tuple still loads |
 | `DISRUPTION_CLASSIFIER_PATH` | `model_training/disruption_classifier.pkl` | XGBoost binary disruption; `predicted_disruption_probability` |

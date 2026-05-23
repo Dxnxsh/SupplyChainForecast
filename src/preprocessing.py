@@ -17,7 +17,7 @@ from gliner2 import GLiNER2
 # --- Performance Configuration ---
 NER_BATCH_SIZE = int(os.getenv("NER_BATCH_SIZE", "32"))
 ML_CLASSIFIER_PATH = os.getenv("ML_CLASSIFIER_PATH", "model_training/classifier.pkl")
-_GLINER_MODEL_ID = os.getenv("GLINER_MODEL", "fastino/gliner2-large-v1")
+_GLINER_MODEL_ID = os.getenv("GLINER_MODEL", "fastino/gliner2-base-v1")
 _GLINER_LABEL = "location"
 PROGRESS_EVERY_DOCS = int(os.getenv("PREPROCESS_PROGRESS_EVERY_DOCS", "25"))
 # Incremented when NER raises (e.g. HIP/CUDA kernel mismatch); see end-of-run summary.

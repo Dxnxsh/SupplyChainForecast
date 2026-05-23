@@ -34,6 +34,35 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+_WEBHOSE_CATEGORY_EVENT_MAP: dict[str, str] = {
+    "Economy, Business and Finance": "Demand_Supply_Shift",
+    "Politics": "Political_Regulatory",
+    "Politics->government": "Political_Regulatory",
+    "Politics->political parties": "Political_Regulatory",
+    "Disasters and Accidents": "Natural_Disaster",
+    "Labor": "Labor_Issue",
+    "Labor Issues": "Labor_Issue",
+    "Technology": "Cyber_Attack",
+    "Cyber": "Cyber_Attack",
+    "Transport": "Logistics_Issue",
+    "Logistics": "Logistics_Issue",
+    "Industry": "Industrial_Accident",
+    "Manufacturing": "Industrial_Accident",
+}
+
+
+def _event_types_from_webhose_meta(webhose_meta: dict | None) -> list[str]:
+    """Map Webhose categories to pipeline event types. Returns [] when meta is absent."""
+    if not webhose_meta:
+        return []
+    types = []
+    for cat in webhose_meta.get("categories") or []:
+        mapped = _WEBHOSE_CATEGORY_EVENT_MAP.get(cat)
+        if mapped and mapped not in types:
+            types.append(mapped)
+    return types
+
+
 ML_TO_RISK = {"HIGH": 85.0, "MEDIUM": 45.0, "LOW": 15.0}
 
 ingestion_status = {
@@ -395,9 +424,11 @@ def enrich_events_for_db(
 
     log(f"[enrich] 1/5 keywords + event types ({n} articles)")
     for ev in batch:
-        ev["potential_event_types"] = detect_potential_events(
+        text_types = detect_potential_events(
             ev["event_text_segment"], ev.get("article_title", "")
         )
+        meta_types = _event_types_from_webhose_meta(ev.get("webhose_meta"))
+        ev["potential_event_types"] = list(dict.fromkeys(meta_types + text_types))
 
     if is_background:
         update_status(current_step="Extracting geographic locations via NER...", progress_percent=50)
@@ -406,7 +437,8 @@ def enrich_events_for_db(
     texts_for_ner = [ev["event_text_segment"] for ev in batch]
     locations_batch = extract_locations_batch(texts_for_ner)
     for ev, locs in zip(batch, locations_batch):
-        ev["extracted_locations"] = locs
+        pre_locs = (ev.get("webhose_meta") or {}).get("locations") or []
+        ev["extracted_locations"] = list(dict.fromkeys(pre_locs + locs))
 
     if is_background:
         update_status(current_step="Geocoding and Matching Nodes...", progress_percent=60)

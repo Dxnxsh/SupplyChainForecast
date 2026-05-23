@@ -60,6 +60,8 @@ def entries_to_scored_events(
             label_encoder,
         )
         if ev:
+            if entry.get("webhose_meta"):
+                ev["webhose_meta"] = entry["webhose_meta"]
             events.append(ev)
     return events
 

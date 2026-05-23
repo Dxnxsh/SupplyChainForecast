@@ -185,3 +185,27 @@ def test_merge_webhose_only_entries_included():
     merged = merge_entries([], [webhose_only])
     urls = {_url_from_label(e["label"]) for e in merged}
     assert "https://x.com/new" in urls
+
+
+# ── load_web_scrape_entries tests (Task 3) ─────────────────────────────────────
+
+def test_load_web_scrape_entries_reads_json_files(tmp_path):
+    from scripts.prepare_webhose_data import load_web_scrape_entries
+    entries = [SCRAPE_ENTRY, UNIQUE_SCRAPE]
+    (tmp_path / "batch.json").write_text(json.dumps(entries), encoding="utf-8")
+    result = load_web_scrape_entries(tmp_path)
+    assert len(result) == 2
+    assert result[0]["label"] == SCRAPE_ENTRY["label"]
+
+
+def test_load_web_scrape_entries_missing_dir_returns_empty(tmp_path):
+    from scripts.prepare_webhose_data import load_web_scrape_entries
+    result = load_web_scrape_entries(tmp_path / "nonexistent")
+    assert result == []
+
+
+def test_load_web_scrape_entries_skips_non_list_json(tmp_path):
+    from scripts.prepare_webhose_data import load_web_scrape_entries
+    (tmp_path / "bad.json").write_text(json.dumps({"not": "a list"}), encoding="utf-8")
+    result = load_web_scrape_entries(tmp_path)
+    assert result == []

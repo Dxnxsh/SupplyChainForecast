@@ -207,18 +207,53 @@ def group_by_quarter(entries: list[dict]) -> dict[tuple[int, int], list[dict]]:
     return dict(groups)
 
 
+_MAX_FILE_BYTES = 50 * 1024 * 1024  # 50 MB — under GitHub's recommended 50 MB limit
+
+
 def write_combined(
     groups: dict[tuple[int, int], list[dict]],
     out_dir: Path,
+    max_bytes: int = _MAX_FILE_BYTES,
 ) -> None:
-    """Write one JSON file per quarter to out_dir. Strips webhose_meta before writing."""
+    """
+    Write quarterly JSON files to out_dir, splitting into parts when a file
+    would exceed max_bytes. Strips webhose_meta — pipeline only needs label + text.
+    Output filenames: all_news_{year}_q{N}.json or all_news_{year}_q{N}_part{K}.json.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     for (year, quarter), entries in sorted(groups.items()):
-        filename = out_dir / f"all_news_{year}_q{quarter}.json"
-        # Strip webhose_meta — pipeline only needs label + text
-        clean_entries = [{"label": e["label"], "text": e["text"]} for e in entries if e.get("label") and "text" in e]
-        filename.write_text(json.dumps(clean_entries, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"  ✅ Wrote {len(clean_entries):,} articles → {filename.name}")
+        clean_entries = [
+            {"label": e["label"], "text": e["text"]}
+            for e in entries
+            if e.get("label") and "text" in e
+        ]
+
+        encoded = json.dumps(clean_entries, ensure_ascii=False, indent=2).encode("utf-8")
+        if len(encoded) <= max_bytes:
+            filename = out_dir / f"all_news_{year}_q{quarter}.json"
+            filename.write_bytes(encoded)
+            print(f"  ✅ Wrote {len(clean_entries):,} articles → {filename.name}")
+            continue
+
+        # Split into parts
+        part = 1
+        chunk: list[dict] = []
+        chunk_bytes = 2  # opening "[\n" + closing "\n]"
+        for entry in clean_entries:
+            entry_bytes = len(json.dumps(entry, ensure_ascii=False, indent=2).encode("utf-8")) + 2
+            if chunk and chunk_bytes + entry_bytes > max_bytes:
+                filename = out_dir / f"all_news_{year}_q{quarter}_part{part}.json"
+                filename.write_text(json.dumps(chunk, ensure_ascii=False, indent=2), encoding="utf-8")
+                print(f"  ✅ Wrote {len(chunk):,} articles → {filename.name}")
+                part += 1
+                chunk = []
+                chunk_bytes = 2
+            chunk.append(entry)
+            chunk_bytes += entry_bytes
+        if chunk:
+            filename = out_dir / f"all_news_{year}_q{quarter}_part{part}.json"
+            filename.write_text(json.dumps(chunk, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"  ✅ Wrote {len(chunk):,} articles → {filename.name}")
 
 
 def write_sidecar(sidecars: list[dict], out_dir: Path) -> None:

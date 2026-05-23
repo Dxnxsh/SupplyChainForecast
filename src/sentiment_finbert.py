@@ -178,6 +178,7 @@ def batch_analyze_finbert(texts: list[str]) -> list[dict]:
     pipe = get_finbert_pipeline()
     trimmed = [t[:8000] if t else "" for t in texts]
     from tqdm import tqdm
+    import torch
     
     def gen():
         for t in trimmed:
@@ -186,12 +187,29 @@ def batch_analyze_finbert(texts: list[str]) -> list[dict]:
     finbert_batch_size = int(os.getenv("FINBERT_BATCH_SIZE", "256"))
     raw = []
     try:
-        for out in tqdm(
+        pbar = tqdm(
             pipe(gen(), batch_size=finbert_batch_size),
             total=len(trimmed),
             desc="Step 5/5: Analyzing Sentiment (FinBERT)",
-        ):
+        )
+        for idx, out in enumerate(pbar):
             raw.append(out)
+            
+            # Display GPU VRAM metrics periodically to avoid overhead
+            if idx % 100 == 0 or idx == len(trimmed) - 1:
+                try:
+                    if torch.cuda.is_available():
+                        alloc = torch.cuda.memory_allocated() / (1024**3)
+                        res = torch.cuda.memory_reserved() / (1024**3)
+                        pbar.set_postfix({"vram": f"{alloc:.2f}/{res:.2f}GB"})
+                    elif hasattr(torch, "mps") and torch.backends.mps.is_available():
+                        try:
+                            alloc = torch.mps.current_allocated_memory() / (1024**3)
+                            pbar.set_postfix({"vram": f"{alloc:.2f}GB"})
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
     except Exception as e:
         if not _FINBERT_CPU_LOCKED and _is_gpu_exec_error(e):
             _force_finbert_cpu(str(e).split("\n")[0][:120])

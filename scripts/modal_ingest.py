@@ -24,6 +24,7 @@ image = (
         "xgboost>=2.0.0",
         "torch==2.6.0",
         "transformers==4.57.0",
+        "gliner2",
         "spacy==3.7.4",
         "psycopg2-binary==2.9.10",
         "SQLAlchemy==2.0.44",
@@ -49,8 +50,8 @@ image = (
         "SKIP_NOMINATIM": skip_nominatim
     })],
     env={
-        "NER_BATCH_SIZE": "1024",
-        "FINBERT_BATCH_SIZE": "1024"
+        "NER_BATCH_SIZE": "256",
+        "FINBERT_BATCH_SIZE": "256"
     },
     timeout=86400    # Allow up to 24 hours execution
 )

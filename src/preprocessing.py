@@ -278,15 +278,31 @@ def extract_locations_batch(texts):
         labels = [_GLINER_LABEL]
 
         all_locations = []
-        for i in tqdm(
+        pbar = tqdm(
             range(0, len(texts), NER_BATCH_SIZE),
             desc="Step 2/5: Extracting Locations (NER)",
-        ):
+        )
+        for i in pbar:
             batch = [t or "" for t in texts[i:i + NER_BATCH_SIZE]]
             batch_results = model.batch_extract_entities(batch, labels)
             for result in batch_results:
                 locs = result.get("entities", {}).get(_GLINER_LABEL, [])
                 all_locations.append(locs)
+            
+            # Display GPU VRAM metrics dynamically
+            try:
+                if torch.cuda.is_available():
+                    alloc = torch.cuda.memory_allocated() / (1024**3)
+                    res = torch.cuda.memory_reserved() / (1024**3)
+                    pbar.set_postfix({"vram": f"{alloc:.2f}/{res:.2f}GB"})
+                elif hasattr(torch, "mps") and torch.backends.mps.is_available():
+                    try:
+                        alloc = torch.mps.current_allocated_memory() / (1024**3)
+                        pbar.set_postfix({"vram": f"{alloc:.2f}GB"})
+                    except Exception:
+                        pass
+            except Exception:
+                pass
         return all_locations
     except Exception as e:
         global _NER_BATCH_EXCEPTIONS

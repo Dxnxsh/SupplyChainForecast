@@ -180,6 +180,47 @@ def merge_entries(scrape_entries: list[dict], webhose_entries: list[dict]) -> li
     return list(merged.values())
 
 
+def quarter_from_label(label: str) -> Optional[tuple[int, int]]:
+    """Return (year, quarter) parsed from the timestamp in a label string."""
+    parts = label.split(";")
+    if len(parts) < 4:
+        return None
+    dt = _parse_utc(parts[3])
+    if dt is None:
+        return None
+    q = (dt.month - 1) // 3 + 1
+    return (dt.year, q)
+
+
+def group_by_quarter(entries: list[dict]) -> dict[tuple[int, int], list[dict]]:
+    """Group entries into {(year, quarter): [entries]} buckets."""
+    groups: dict[tuple[int, int], list[dict]] = defaultdict(list)
+    skipped = 0
+    for entry in entries:
+        key = quarter_from_label(entry.get("label", ""))
+        if key is None:
+            skipped += 1
+            continue
+        groups[key].append(entry)
+    if skipped:
+        print(f"⚠️  Skipped {skipped} entries with unparseable timestamps.")
+    return dict(groups)
+
+
+def write_combined(
+    groups: dict[tuple[int, int], list[dict]],
+    out_dir: Path,
+) -> None:
+    """Write one JSON file per quarter to out_dir. Strips webhose_meta before writing."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for (year, quarter), entries in sorted(groups.items()):
+        filename = out_dir / f"all_news_{year}_q{quarter}.json"
+        # Strip webhose_meta — pipeline only needs label + text
+        clean_entries = [{"label": e["label"], "text": e["text"]} for e in entries]
+        filename.write_text(json.dumps(clean_entries, ensure_ascii=False, indent=2), encoding="utf-8")
+        print(f"  ✅ Wrote {len(clean_entries):,} articles → {filename.name}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare Webhose datasets for pipeline ingestion.")
     parser.add_argument(

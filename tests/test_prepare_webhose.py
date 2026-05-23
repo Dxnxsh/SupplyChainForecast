@@ -13,6 +13,8 @@ from scripts.prepare_webhose_data import (
     extract_articles_from_zip,
     merge_entries,
     _url_from_label,
+    quarter_from_label,
+    group_by_quarter,
 )
 
 SAMPLE = {
@@ -209,3 +211,45 @@ def test_load_web_scrape_entries_skips_non_list_json(tmp_path):
     (tmp_path / "bad.json").write_text(json.dumps({"not": "a list"}), encoding="utf-8")
     result = load_web_scrape_entries(tmp_path)
     assert result == []
+
+
+# ── Quarter grouping tests (Task 4) ───────────────────────────────────────────
+
+Q1_ENTRY = {"label": "a.com;T;https://a.com/1;2025-02-15T00:00:00+00:00", "text": "x"}
+Q2_ENTRY = {"label": "a.com;T;https://a.com/2;2025-05-01T00:00:00+00:00", "text": "x"}
+Q3_ENTRY = {"label": "a.com;T;https://a.com/3;2025-08-20T00:00:00+00:00", "text": "x"}
+Q4_ENTRY = {"label": "a.com;T;https://a.com/4;2025-11-01T00:00:00+00:00", "text": "x"}
+Q1_2026  = {"label": "a.com;T;https://a.com/5;2026-01-10T00:00:00+00:00", "text": "x"}
+
+
+def test_quarter_from_label_q1():
+    assert quarter_from_label(Q1_ENTRY["label"]) == (2025, 1)
+
+
+def test_quarter_from_label_q2():
+    assert quarter_from_label(Q2_ENTRY["label"]) == (2025, 2)
+
+
+def test_quarter_from_label_q3():
+    assert quarter_from_label(Q3_ENTRY["label"]) == (2025, 3)
+
+
+def test_quarter_from_label_q4():
+    assert quarter_from_label(Q4_ENTRY["label"]) == (2025, 4)
+
+
+def test_quarter_from_label_2026():
+    assert quarter_from_label(Q1_2026["label"]) == (2026, 1)
+
+
+def test_group_by_quarter_keys():
+    grouped = group_by_quarter([Q1_ENTRY, Q2_ENTRY, Q3_ENTRY, Q4_ENTRY, Q1_2026])
+    assert (2025, 1) in grouped
+    assert (2025, 2) in grouped
+    assert (2026, 1) in grouped
+
+
+def test_group_by_quarter_counts():
+    grouped = group_by_quarter([Q1_ENTRY, Q2_ENTRY, Q3_ENTRY, Q4_ENTRY, Q1_2026])
+    assert len(grouped[(2025, 1)]) == 1
+    assert len(grouped[(2026, 1)]) == 1

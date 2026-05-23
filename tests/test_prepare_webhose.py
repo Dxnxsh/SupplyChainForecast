@@ -11,6 +11,8 @@ from scripts.prepare_webhose_data import (
     CATEGORY_EVENT_MAP,
     parse_zip_date,
     extract_articles_from_zip,
+    merge_entries,
+    _url_from_label,
 )
 
 SAMPLE = {
@@ -135,3 +137,51 @@ def test_extract_articles_from_zip_skips_invalid_json():
     buf.seek(0)
     result = extract_articles_from_zip(buf)
     assert len(result) == 1
+
+
+# ── Merge / deduplication tests (Task 3) ──────────────────────────────────────
+
+SCRAPE_ENTRY = {
+    "label": "guardian.com;Old headline;https://rawstory.com/article;2025-01-12T21:33:00+00:00",
+    "text": "Old text",
+}
+WEBHOSE_ENTRY = {
+    "label": "rawstory.com;Some headline;https://rawstory.com/article;2025-01-12T21:33:00+00:00",
+    "text": "Article body...",
+    "webhose_meta": {"locations": ["Taiwan"], "categories": ["Politics"]},
+}
+UNIQUE_SCRAPE = {
+    "label": "bbc.com;Different;https://bbc.com/unique;2025-02-01T00:00:00+00:00",
+    "text": "Unique scrape text",
+}
+
+
+def test_url_from_label():
+    assert _url_from_label(SCRAPE_ENTRY["label"]) == "https://rawstory.com/article"
+
+
+def test_merge_webhose_wins_on_conflict():
+    merged = merge_entries([SCRAPE_ENTRY, UNIQUE_SCRAPE], [WEBHOSE_ENTRY])
+    by_url = {_url_from_label(e["label"]): e for e in merged}
+    result = by_url["https://rawstory.com/article"]
+    assert result["text"] == "Article body..."
+    assert "webhose_meta" in result
+
+
+def test_merge_keeps_unique_scrape_entries():
+    merged = merge_entries([SCRAPE_ENTRY, UNIQUE_SCRAPE], [WEBHOSE_ENTRY])
+    urls = {_url_from_label(e["label"]) for e in merged}
+    assert "https://bbc.com/unique" in urls
+
+
+def test_merge_no_duplicates():
+    merged = merge_entries([SCRAPE_ENTRY, UNIQUE_SCRAPE], [WEBHOSE_ENTRY])
+    urls = [_url_from_label(e["label"]) for e in merged]
+    assert len(urls) == len(set(urls))
+
+
+def test_merge_webhose_only_entries_included():
+    webhose_only = {**WEBHOSE_ENTRY, "label": "x.com;New;https://x.com/new;2025-03-01T00:00:00+00:00"}
+    merged = merge_entries([], [webhose_only])
+    urls = {_url_from_label(e["label"]) for e in merged}
+    assert "https://x.com/new" in urls

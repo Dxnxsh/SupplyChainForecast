@@ -140,6 +140,46 @@ def normalize_article(
     return pipeline_entry, sidecar
 
 
+def _url_from_label(label: str) -> str:
+    """Extract URL (3rd semicolon-separated field) from a label string."""
+    parts = label.split(";")
+    return parts[2] if len(parts) > 2 else ""
+
+
+def load_web_scrape_entries(scrape_dir: Path) -> list[dict]:
+    """Load all *.json files from data/raw/web_scrape/ into a flat list."""
+    entries = []
+    if not scrape_dir.exists():
+        return entries
+    for path in sorted(scrape_dir.glob("*.json")):
+        try:
+            raw = path.read_text(encoding="utf-8", errors="replace")
+            cleaned = re.sub(r"[\x00-\x1f]", "", raw)
+            data = json.loads(cleaned)
+            if isinstance(data, list):
+                entries.extend(data)
+        except Exception as exc:
+            print(f"⚠️  Could not load {path.name}: {exc}")
+    return entries
+
+
+def merge_entries(scrape_entries: list[dict], webhose_entries: list[dict]) -> list[dict]:
+    """
+    Merge web_scrape and Webhose entries, deduplicating by URL.
+    Webhose wins on conflict.
+    """
+    merged: dict[str, dict] = {}
+    for entry in scrape_entries:
+        url = _url_from_label(entry.get("label", ""))
+        if url:
+            merged[url] = entry
+    for entry in webhose_entries:
+        url = _url_from_label(entry.get("label", ""))
+        if url:
+            merged[url] = entry  # Webhose overwrites
+    return list(merged.values())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Prepare Webhose datasets for pipeline ingestion.")
     parser.add_argument(

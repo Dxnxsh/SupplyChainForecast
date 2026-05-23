@@ -118,6 +118,7 @@ email-validator==2.3.0
 # GEOSPATIAL
 # =========================
 geopy==2.4.1
+geonamescache==3.0.1
 shapely==2.1.2
 
 # =========================

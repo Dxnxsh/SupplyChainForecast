@@ -419,7 +419,7 @@ def enrich_events_for_db(
             print(msg, flush=True)
 
     from src.preprocessing import NER_BATCH_SIZE, extract_locations_batch, detect_potential_events
-    from src.geocoding import geocode_location_with_retry, save_geocode_cache
+    from src.geocoding import geocode_batch
     from src.match_events_to_nodes import match_event_to_node
 
     log(f"[enrich] 1/5 keywords + event types ({n} articles)")
@@ -443,15 +443,26 @@ def enrich_events_for_db(
     if is_background:
         update_status(current_step="Geocoding and Matching Nodes...", progress_percent=60)
 
-    log(f"[enrich] 3/5 geocode + supplier match ({n} articles, ~1.1s between geocoder calls when needed)")
+    log(f"[enrich] 3/5 geocode + supplier match ({n} articles)")
+    loc_strings = [
+        ev["extracted_locations"][0]
+        for ev in batch
+        if ev.get("extracted_locations") and ev["extracted_locations"][0]
+    ]
+    coords_map = geocode_batch(loc_strings, verbose=verbose)
+
     step = 1 if n <= 100 else max(1, n // 25)
     for i, ev in enumerate(batch):
-        if ev["extracted_locations"]:
-            lat, lon = geocode_location_with_retry(ev["extracted_locations"][0])
+        locs = ev.get("extracted_locations")
+        if locs and locs[0]:
+            lat, lon = coords_map.get(locs[0], (None, None))
             ev["latitude"] = lat
             ev["longitude"] = lon
-            ev["geocoded_location_text"] = ev["extracted_locations"][0] if lat is not None else None
-            time.sleep(1.1)
+            ev["geocoded_location_text"] = locs[0] if lat is not None else None
+        else:
+            ev.setdefault("latitude", None)
+            ev.setdefault("longitude", None)
+            ev.setdefault("geocoded_location_text", None)
 
         ev["matched_node"] = match_event_to_node(ev)
         if verbose and ((i + 1) % step == 0 or i == n - 1):
@@ -462,8 +473,6 @@ def enrich_events_for_db(
         if is_background:
             pct = 60 + int((i + 1) / n * 30)
             update_status(progress_percent=pct, items_processed=i + 1)
-
-    save_geocode_cache(geocode_location_with_retry.cache)
 
     if not skip_temporal:
         if is_background:

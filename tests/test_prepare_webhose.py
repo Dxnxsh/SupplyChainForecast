@@ -275,3 +275,43 @@ def test_write_combined_strips_webhose_meta(tmp_path):
     write_combined({(2025, 1): [entry_with_meta]}, tmp_path)
     written = json.loads((tmp_path / "all_news_2025_q1.json").read_text())
     assert "webhose_meta" not in written[0]
+
+
+# ── write_sidecar and iter_webhose_repo tests (Task 5) ─────────────────────────
+
+def test_write_sidecar_creates_jsonl(tmp_path):
+    from scripts.prepare_webhose_data import write_sidecar
+    sidecars = [
+        {"url": "https://a.com/1", "sentiment": "negative", "dataset_source": "webhose_political"},
+        {"url": "https://a.com/2", "sentiment": "positive", "dataset_source": "webhose_financial"},
+    ]
+    write_sidecar(sidecars, tmp_path)
+    out = tmp_path / "webhose_metadata.jsonl"
+    assert out.exists()
+    lines = out.read_text().strip().splitlines()
+    assert len(lines) == 2
+    assert json.loads(lines[0])["url"] == "https://a.com/1"
+    assert json.loads(lines[1])["sentiment"] == "positive"
+
+
+def test_iter_webhose_repo_missing_datasets_returns_empty(tmp_path):
+    from scripts.prepare_webhose_data import iter_webhose_repo
+    entries, sidecars = iter_webhose_repo(tmp_path, "webhose_political")
+    assert entries == []
+    assert sidecars == []
+
+
+def test_iter_webhose_repo_processes_zip(tmp_path):
+    from scripts.prepare_webhose_data import iter_webhose_repo
+    datasets_dir = tmp_path / "Datasets"
+    datasets_dir.mkdir()
+    # Build a zip with one 2025 English article
+    zip_path = datasets_dir / "Politics_negative_20250112070219.zip"
+    buf = io.BytesIO()
+    with _zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("folder/article_1.json", json.dumps(SAMPLE))
+    zip_path.write_bytes(buf.getvalue())
+    entries, sidecars = iter_webhose_repo(tmp_path, "webhose_political")
+    assert len(entries) == 1
+    assert len(sidecars) == 1
+    assert sidecars[0]["dataset_source"] == "webhose_political"

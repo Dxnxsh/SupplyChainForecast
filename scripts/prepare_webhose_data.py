@@ -251,7 +251,8 @@ def iter_webhose_repo(repo_dir: Path, dataset_source: str) -> tuple[list[dict], 
         if zip_date is None or zip_date < CUTOFF:
             continue
         try:
-            articles = extract_articles_from_zip(zip_path.open("rb"))
+            with zip_path.open("rb") as fh:
+                articles = extract_articles_from_zip(fh)
         except Exception as exc:
             print(f"  Failed to open {zip_path.name}: {exc}")
             continue

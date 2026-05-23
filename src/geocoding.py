@@ -178,6 +178,10 @@ def geocode_location_with_retry(
         return cached if cached else (None, None)
 
     geocode_location_with_retry.last_was_cache = False
+    
+    if os.getenv("SKIP_NOMINATIM", "0") == "1":
+        return None, None
+
     for attempt in range(RETRY_ATTEMPTS):
         try:
             location = nominatim_geolocator.geocode(location_name)

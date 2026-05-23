@@ -87,17 +87,22 @@ def fetch_existing_article_urls(engine, urls: list) -> set:
     if not unique:
         return set()
     from sqlalchemy import bindparam
+    from sqlalchemy.exc import SQLAlchemyError
 
     found: set = set()
     chunk_size = 400
     stmt = text("SELECT article_url FROM events WHERE article_url IN :url_list").bindparams(
         bindparam("url_list", expanding=True)
     )
-    with engine.connect() as conn:
-        for i in range(0, len(unique), chunk_size):
-            chunk = unique[i : i + chunk_size]
-            result = conn.execute(stmt, {"url_list": chunk})
-            found.update(row[0] for row in result if row[0])
+    try:
+        with engine.connect() as conn:
+            for i in range(0, len(unique), chunk_size):
+                chunk = unique[i : i + chunk_size]
+                result = conn.execute(stmt, {"url_list": chunk})
+                found.update(row[0] for row in result if row[0])
+    except SQLAlchemyError as e:
+        # Table might not exist yet; return empty set
+        pass
     return found
 
 

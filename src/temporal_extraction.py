@@ -338,11 +338,12 @@ def enrich_events_with_temporal_data(events):
     Enriches all events with temporal extraction data.
     """
     print(f"🕐 Extracting temporal information from {len(events)} events...")
+    from tqdm import tqdm
     
     enriched_events = []
     predictive_count = 0
     
-    for event in events:
+    for event in tqdm(events, desc="Step 4/5: Temporal Enrichment"):
         temporal_info = extract_event_temporal_context(event)
         event['temporal_info'] = temporal_info
         

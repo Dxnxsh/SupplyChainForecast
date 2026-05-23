@@ -91,6 +91,23 @@ def _strip_html(text: str) -> str:
     return text
 
 
+def _pin_model_to_cpu(model):
+    """
+    Force XGBoost models to run on CPU so that scipy sparse matrices from TF-IDF
+    don't trigger an internal CPU→GPU DMatrix conversion (the 'mismatched devices'
+    warning). Sklearn pipelines and other model types are unaffected.
+    """
+    try:
+        import xgboost as xgb
+        if isinstance(model, (xgb.XGBClassifier, xgb.XGBRegressor, xgb.XGBModel)):
+            model.set_params(device="cpu", tree_method="hist")
+        elif isinstance(model, xgb.Booster):
+            model.set_param({"device": "cpu", "tree_method": "hist"})
+    except Exception:
+        pass  # Not XGBoost or xgboost not installed — no-op
+    return model
+
+
 def load_classifier(model_path: str):
     path = Path(model_path)
     if not path.is_file():
@@ -98,9 +115,9 @@ def load_classifier(model_path: str):
     with path.open("rb") as f:
         payload = pickle.load(f)
     if isinstance(payload, tuple) and len(payload) == 3:
-        return payload[0], payload[1], payload[2]
+        return payload[0], _pin_model_to_cpu(payload[1]), payload[2]
     if isinstance(payload, tuple) and len(payload) == 2:
-        return payload[0], payload[1], None
+        return payload[0], _pin_model_to_cpu(payload[1]), None
     raise ValueError(f"Expected 2- or 3-tuple in classifier pickle: {path}")
 
 
@@ -114,6 +131,7 @@ def load_impact_regressor(model_path: str | None):
         payload = pickle.load(f)
     if not isinstance(payload, dict) or "model" not in payload or "artifacts" not in payload:
         raise ValueError(f"Invalid impact regressor artifact format: {path}")
+    _pin_model_to_cpu(payload["model"])
     return payload
 
 
@@ -127,6 +145,7 @@ def load_disruption_classifier(model_path: str | None):
         payload = pickle.load(f)
     if not isinstance(payload, dict) or "model" not in payload or "artifacts" not in payload:
         raise ValueError(f"Invalid disruption classifier artifact format: {path}")
+    _pin_model_to_cpu(payload["model"])
     return payload
 
 
@@ -429,8 +448,10 @@ def enrich_events_for_db(
     from src.geocoding import geocode_batch
     from src.match_events_to_nodes import match_event_to_node
 
+    from tqdm import tqdm
+
     log(f"[enrich] 1/5 keywords + event types ({n} articles)")
-    for ev in batch:
+    for ev in tqdm(batch, desc="Step 1/5: Keywords & Event Types"):
         text_types = detect_potential_events(
             ev["event_text_segment"], ev.get("article_title", "")
         )
@@ -447,10 +468,20 @@ def enrich_events_for_db(
         pre_locs = (ev.get("webhose_meta") or {}).get("locations") or []
         ev["extracted_locations"] = list(dict.fromkeys(pre_locs + locs))
 
-    if is_background:
-        update_status(current_step="Geocoding and Matching Nodes...", progress_percent=60)
+    if not skip_temporal:
+        if is_background:
+            update_status(current_step="Extracting Temporal Projections...", progress_percent=55)
+        log(f"[enrich] 3/5 temporal enrichment")
+        from src.temporal_extraction import enrich_events_with_temporal_data
 
-    log(f"[enrich] 3/5 geocode + supplier match ({n} articles)")
+        batch[:] = enrich_events_with_temporal_data(batch)
+    else:
+        log("[enrich] 3/5 temporal skipped (--skip-temporal)")
+
+    if is_background:
+        update_status(current_step="Geocoding and Matching Nodes...", progress_percent=70)
+
+    log(f"[enrich] 4/5 geocode + supplier match ({n} articles)")
     loc_strings = [
         ev["extracted_locations"][0]
         for ev in batch
@@ -459,7 +490,7 @@ def enrich_events_for_db(
     coords_map = geocode_batch(loc_strings, verbose=verbose)
 
     step = 1 if n <= 100 else max(1, n // 25)
-    for i, ev in enumerate(batch):
+    for i, ev in enumerate(tqdm(batch, desc="Step 4/5: Geocoding & Matching Suppliers")):
         locs = ev.get("extracted_locations")
         if locs and locs[0]:
             lat, lon = coords_map.get(locs[0], (None, None))
@@ -478,18 +509,8 @@ def enrich_events_for_db(
                 f"lat={ev.get('latitude')} lon={ev.get('longitude')}"
             )
         if is_background:
-            pct = 60 + int((i + 1) / n * 30)
+            pct = 70 + int((i + 1) / n * 20)
             update_status(progress_percent=pct, items_processed=i + 1)
-
-    if not skip_temporal:
-        if is_background:
-            update_status(current_step="Extracting Temporal Projections...", progress_percent=85)
-        log(f"[enrich] 4/5 temporal enrichment")
-        from src.temporal_extraction import enrich_events_with_temporal_data
-
-        batch[:] = enrich_events_with_temporal_data(batch)
-    else:
-        log("[enrich] 4/5 temporal skipped (--skip-temporal)")
 
     if impact_payload or disruption_payload:
         try:

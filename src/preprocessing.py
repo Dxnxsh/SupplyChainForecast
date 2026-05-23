@@ -62,6 +62,15 @@ def load_ml_classifier(model_path=ML_CLASSIFIER_PATH):
             vectorizer, model, label_encoder = payload[0], payload[1], None
         else:
             raise ValueError("classifier pickle must be 2- or 3-tuple")
+        # Pin XGBoost to CPU so TF-IDF sparse matrices don't trigger a CPU→GPU transfer.
+        try:
+            import xgboost as xgb
+            if isinstance(model, (xgb.XGBClassifier, xgb.XGBRegressor, xgb.XGBModel)):
+                model.set_params(device="cpu", tree_method="hist")
+            elif isinstance(model, xgb.Booster):
+                model.set_param({"device": "cpu", "tree_method": "hist"})
+        except Exception:
+            pass
         print(f"✅ ML risk classifier loaded from {model_path}")
         return vectorizer, model, label_encoder
     except Exception as e:
@@ -88,6 +97,8 @@ def get_ner_pipeline():
                 model="dbmdz/bert-large-cased-finetuned-conll03-english",
                 aggregation_strategy="simple",
                 device=ner_device,
+                truncation=True,
+                max_length=256,
             )
             if ner_device_name == "mps":
                 print(
@@ -112,7 +123,6 @@ def get_ner_pipeline():
         except Exception as e:
             print(f"❌ Error loading Hugging Face NER model: {e}")
             print("Check internet connection and ensure `transformers` and `torch` are installed.")
-            # In a real app we might want to raise, but keeping original logic of potentially exiting or failing later
             raise e
     return _ner_pipeline
 
@@ -278,9 +288,20 @@ def extract_locations_batch(texts):
         return []
     try:
         pipe = get_ner_pipeline()
-        predictions = pipe(texts, batch_size=NER_BATCH_SIZE)
+        from tqdm import tqdm
+        
+        def gen():
+            for t in texts:
+                yield t or ""
+
+        # Process results on-the-fly to avoid accumulating 179k entity dicts in RAM,
+        # which caused GC pressure and throughput degradation over long runs.
         all_locations = []
-        for entities in predictions:
+        for entities in tqdm(
+            pipe(gen(), batch_size=NER_BATCH_SIZE),
+            total=len(texts),
+            desc="Step 2/5: Extracting Locations (NER)",
+        ):
             locations = [entity['word'] for entity in entities if entity.get('entity_group') == 'LOC']
             all_locations.append(list(set(locations)))
         return all_locations

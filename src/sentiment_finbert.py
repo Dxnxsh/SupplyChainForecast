@@ -177,12 +177,26 @@ def batch_analyze_finbert(texts: list[str]) -> list[dict]:
         return []
     pipe = get_finbert_pipeline()
     trimmed = [t[:8000] if t else "" for t in texts]
+    from tqdm import tqdm
+    
+    def gen():
+        for t in trimmed:
+            yield t
+
+    finbert_batch_size = int(os.getenv("FINBERT_BATCH_SIZE", "256"))
+    raw = []
     try:
-        raw = pipe(trimmed)
+        for out in tqdm(
+            pipe(gen(), batch_size=finbert_batch_size),
+            total=len(trimmed),
+            desc="Step 5/5: Analyzing Sentiment (FinBERT)",
+        ):
+            raw.append(out)
     except Exception as e:
         if not _FINBERT_CPU_LOCKED and _is_gpu_exec_error(e):
             _force_finbert_cpu(str(e).split("\n")[0][:120])
-            raw = get_finbert_pipeline()(trimmed)
+            pipe = get_finbert_pipeline()
+            raw = list(pipe(trimmed))
         else:
             raise
     results = []

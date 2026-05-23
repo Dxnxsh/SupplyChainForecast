@@ -18,7 +18,11 @@ import argparse
 import json
 import os
 import sys
+import warnings
 from pathlib import Path
+
+# Silence harmless scikit-learn feature name mismatch warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -40,29 +44,78 @@ def entries_to_scored_events(
     *,
     limit: int | None = None,
 ) -> list[dict]:
-    """Parse label/text entries and apply legacy classifier.pkl (same as RSS)."""
+    """Parse label/text entries and apply legacy classifier.pkl in batches (blazing fast!)."""
     from src.preprocessing import parse_entry_metadata
-    from src.rss_ingest import build_scored_event_dict
+    from src.rss_ingest import _strip_html
+    import numpy as np
+    import torch
+    from tqdm import tqdm
 
     events: list[dict] = []
-    for entry in entries:
+    model_inputs: list[str] = []
+
+    print(f"Preparing inputs for {len(entries)} entries...")
+    for entry in tqdm(entries, desc="Preparing Inputs"):
         if limit is not None and len(events) >= limit:
             break
         meta = parse_entry_metadata(entry)
-        ev = build_scored_event_dict(
-            meta["url"],
-            meta["source"],
-            meta["title"],
-            meta["timestamp"],
-            meta["original_text"] or "",
-            vectorizer,
-            model,
-            label_encoder,
-        )
-        if ev:
-            if entry.get("webhose_meta"):
-                ev["webhose_meta"] = entry["webhose_meta"]
-            events.append(ev)
+        link = (meta["url"] or "").strip()
+        if not link or not link.startswith("http"):
+            continue
+
+        title = _strip_html(meta["title"] or "")
+        summary = _strip_html(meta["original_text"] or "")
+        body_for_model = summary[:300] if summary else title[:300]
+        model_input = f"{title} {body_for_model}".strip()
+        if len(model_input) < 5:
+            continue
+
+        segment = summary if summary else title
+        if len(segment) > 12000:
+            segment = segment[:12000]
+
+        ev = {
+            "article_url": link,
+            "article_source": meta["source"] or "Unknown",
+            "article_title": title or link,
+            "article_timestamp": meta["timestamp"],
+            "event_text_segment": segment,
+            "potential_event_types": [],
+            "extracted_locations": [],
+        }
+        if entry.get("webhose_meta"):
+            ev["webhose_meta"] = entry["webhose_meta"]
+
+        events.append(ev)
+        model_inputs.append(model_input)
+
+    if not events:
+        return []
+
+    print(f"Transforming text features using TF-IDF for {len(events)} valid entries...")
+    X = vectorizer.transform(model_inputs)
+
+    preds = model.predict(X)
+    probs = model.predict_proba(X)
+
+    if label_encoder is not None:
+        pred_labels = label_encoder.inverse_transform(np.asarray(preds, dtype=int))
+        classes = [str(c) for c in label_encoder.classes_]
+    else:
+        pred_labels = preds
+        classes = [str(c) for c in model.classes_]
+
+    print("Mapping scores back to events...")
+    for idx, ev in enumerate(events):
+        pred_label = str(pred_labels[idx])
+        prob_row = probs[idx]
+        prob_map = {c: round(float(p), 4) for c, p in zip(classes, prob_row)}
+        confidence = max(prob_map.values()) if prob_map else None
+
+        ev["ml_risk_label"] = pred_label
+        ev["ml_risk_confidence"] = confidence
+        ev["ml_risk_probabilities"] = prob_map
+
     return events
 
 

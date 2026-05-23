@@ -57,6 +57,7 @@ openpyxl==3.1.5
 # ML / AI
 # =========================
 torch==2.8.0
+gliner
 transformers==4.57.0
 safetensors==0.6.2
 tiktoken==0.12.0

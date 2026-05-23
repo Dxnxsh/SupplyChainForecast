@@ -130,6 +130,13 @@ def load_disruption_classifier(model_path: str | None):
     return payload
 
 
+def _scalar_cat_value(v) -> str:
+    """Coerce a categorical feature value to a single string for OHE inference."""
+    if isinstance(v, list):
+        return v[0] if v else ""
+    return v or ""
+
+
 def _event_to_shared_features(event: dict, artifacts: dict):
     text_vectorizer = artifacts["text_vectorizer"]
     cat_encoder = artifacts["cat_encoder"]
@@ -138,7 +145,7 @@ def _event_to_shared_features(event: dict, artifacts: dict):
     text_input = [
         ((event.get("article_title") or "") + " " + (event.get("event_text_segment") or "")[:700]).strip()
     ]
-    cat_row = [[(event.get(col) or "") for col in categorical_cols]]
+    cat_row = [[_scalar_cat_value(event.get(col)) for col in categorical_cols]]
     X_text = text_vectorizer.transform(text_input)
     X_cat = cat_encoder.transform(cat_row)
     return sparse.hstack([X_text, X_cat], format="csr")
@@ -169,7 +176,7 @@ def _event_to_impact_features(event: dict, artifacts: dict, disruption_probabili
 
     event_for_features = {
         "article_source": event.get("article_source") or "",
-        "matched_node": event.get("matched_node") or "",
+        "matched_node": _scalar_cat_value(event.get("matched_node")),
         "ml_risk_label": event.get("ml_risk_label") or "UNKNOWN",
         "node_criticality": node_criticality,
         "ml_risk_confidence": float(event.get("ml_risk_confidence") or 0.0),

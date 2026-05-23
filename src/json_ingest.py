@@ -215,7 +215,8 @@ def run_json_ingest(
 def main():
     parser = argparse.ArgumentParser(description="web_scrape JSON → same ML path as RSS → PostgreSQL")
     parser.add_argument(
-        "--dir",
+        "--directory", "--dir",
+        dest="dir",
         default=os.getenv("WEB_SCRAPE_DIR", str(PROJECT_ROOT / "data" / "raw" / "web_scrape")),
         help="Directory containing *.json (root array per file)",
     )

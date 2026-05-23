@@ -73,7 +73,8 @@ def normalize_article(
     source = thread.get("site", "unknown")
     published_utc = dt.isoformat()
 
-    label = f"{source};{title};{url};{published_utc}"
+    title_safe = title.replace(";", " ")
+    label = f"{source};{title_safe};{url};{published_utc}"
 
     entities = article.get("entities", {})
     locations = [loc.get("name") for loc in entities.get("locations", []) if loc.get("name")]
@@ -124,7 +125,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--output-dir",
-        default=str(PROJECT_ROOT / "data" / "raw" / "web_scrape"),
+        default=str(PROJECT_ROOT / "data" / "raw" / "combined"),
         help="Output directory for normalized JSON files",
     )
     args = parser.parse_args()

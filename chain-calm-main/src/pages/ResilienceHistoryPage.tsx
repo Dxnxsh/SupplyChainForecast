@@ -348,9 +348,9 @@ export default function ResilienceHistoryPage() {
                     vertical={false}
                   />
                   {/* Risk zone bands — low / medium / high calibrated to yhat range */}
-                  <ReferenceArea y1={0} y2={BAND_LOW_MAX} fill={RISK_GREEN} fillOpacity={0.05} ifOverflow="visible" />
-                  <ReferenceArea y1={BAND_LOW_MAX} y2={BAND_MED_MAX} fill={SNAPSHOT_AMBER} fillOpacity={0.05} ifOverflow="visible" />
-                  <ReferenceArea y1={BAND_MED_MAX} fill={RISK_RED} fillOpacity={0.05} ifOverflow="visible" />
+                  <ReferenceArea y1={0} y2={BAND_LOW_MAX} fill={RISK_GREEN} fillOpacity={0.05} />
+                  <ReferenceArea y1={BAND_LOW_MAX} y2={BAND_MED_MAX} fill={SNAPSHOT_AMBER} fillOpacity={0.05} />
+                  <ReferenceArea y1={BAND_MED_MAX} fill={RISK_RED} fillOpacity={0.05} />
                   <XAxis
                     dataKey="ds"
                     stroke="hsl(240, 5%, 28%)"
@@ -367,7 +367,7 @@ export default function ResilienceHistoryPage() {
                   <YAxis
                     stroke="hsl(240, 5%, 28%)"
                     tick={{ fill: 'hsl(240, 5%, 40%)', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}
-                    domain={['auto', 'auto']}
+                    domain={[0, 'auto']}
                     tickLine={false}
                     axisLine={false}
                     dx={-8}

@@ -52,6 +52,12 @@ const RISK_RED = 'hsl(0, 75%, 50%)';
 const BAND_LOW_MAX = 1.5;
 const BAND_MED_MAX = 2.2;
 
+function peakBandColor(yhat: number): string {
+  if (yhat < BAND_LOW_MAX) return RISK_GREEN;
+  if (yhat < BAND_MED_MAX) return SNAPSHOT_AMBER;
+  return RISK_RED;
+}
+
 export default function ResilienceHistoryPage() {
   const shouldReduceMotion = useReducedMotion();
   const suppliersQuery = useQuery({
@@ -145,6 +151,12 @@ export default function ResilienceHistoryPage() {
     const forecastPoints = chartData.filter((p) => p.isForecast && p.yhat !== null);
     if (!forecastPoints.length) return null;
     return forecastPoints.reduce((max, p) => (p.yhat! > max.yhat! ? p : max));
+  }, [chartData]);
+
+  const forecastTrend = useMemo(() => {
+    const pts = chartData.filter((p) => p.isForecast && p.yhat !== null);
+    if (pts.length < 2) return null;
+    return pts[pts.length - 1].yhat! - pts[0].yhat!;
   }, [chartData]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -267,20 +279,33 @@ export default function ResilienceHistoryPage() {
         </div>
 
         {/* Stats — horizontal strip matching the map page */}
-        <div className="grid grid-cols-3 gap-px bg-border rounded overflow-hidden mb-5">
+        <div className="grid grid-cols-4 gap-px bg-border rounded overflow-hidden mb-5">
           {[
             {
               label: 'EXPOSURE · LIVE',
               value: selectedSupplier?.riskScore != null ? `${selectedSupplier.riskScore}%` : '—',
+              sub: undefined as string | undefined,
               color: 'text-risk-high',
+              colorStyle: undefined as { color: string } | undefined,
               delay: 0,
             },
             {
               label: 'FORECAST PEAK',
-              value: forecastPeak ? forecastPeak.yhat!.toFixed(1) : '—',
+              value: forecastPeak ? forecastPeak.yhat!.toFixed(2) : '—',
               sub: forecastPeak?.ds,
-              color: 'text-primary',
+              color: '',
+              colorStyle: forecastPeak ? { color: peakBandColor(forecastPeak.yhat!) } : undefined,
               delay: 0.05,
+            },
+            {
+              label: 'TREND · 14D',
+              value: forecastTrend !== null ? `${forecastTrend >= 0 ? '+' : ''}${forecastTrend.toFixed(2)}` : '—',
+              sub: forecastTrend !== null ? (forecastTrend >= 0 ? 'rising' : 'falling') : undefined,
+              color: '',
+              colorStyle: forecastTrend !== null
+                ? { color: forecastTrend >= 0 ? RISK_RED : RISK_GREEN }
+                : undefined,
+              delay: 0.08,
             },
             {
               label: 'MAE · SNAPSHOT',
@@ -289,9 +314,10 @@ export default function ResilienceHistoryPage() {
                 ? `${snapshotQuery.data.completed_days}/${snapshotQuery.data.horizon_days} days${snapshotQuery.data.generated_on_demand ? ' · on demand' : ''}`
                 : undefined,
               color: 'text-primary',
+              colorStyle: undefined,
               delay: 0.1,
             },
-          ].map(({ label, value, sub, color, delay }) => (
+          ].map(({ label, value, sub, color, colorStyle, delay }) => (
             <motion.div
               key={label}
               initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
@@ -300,7 +326,12 @@ export default function ResilienceHistoryPage() {
               className="bg-card px-4 py-3"
             >
               <p className="text-xs font-mono text-muted-foreground tracking-widest">{label}</p>
-              <p className={`text-4xl font-bold font-mono tabular-nums leading-none mt-1 ${color}`}>{value}</p>
+              <p
+                className={`text-4xl font-bold font-mono tabular-nums leading-none mt-1 ${color}`}
+                style={colorStyle}
+              >
+                {value}
+              </p>
               {sub && <p className="text-xs font-mono text-muted-foreground mt-1.5">{sub}</p>}
             </motion.div>
           ))}

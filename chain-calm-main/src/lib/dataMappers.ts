@@ -8,7 +8,7 @@ const riskLevelFromScore = (score: number): RiskLevel => {
   return 'critical';
 };
 
-/** Buckets for supplier node exposure (0–100 roll-up). Wider than event scores so the map is not all red when many nodes sit in the 70–95 range. */
+/** Buckets for supplier node exposure. Calibrated to actual DB range (current_risk_score typically 0–35 due to scoring formula). */
 const supplierExposureLevel = (exposure: number): RiskLevel => {
   if (exposure <= 8) return 'low';
   if (exposure <= 18) return 'medium';

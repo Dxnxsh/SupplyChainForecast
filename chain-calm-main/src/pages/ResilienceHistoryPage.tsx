@@ -147,17 +147,20 @@ export default function ResilienceHistoryPage() {
     return merged.map((p) => ({ ...p, snapshot_yhat: snapshotMap[p.ds] ?? null }));
   }, [historyQuery.data, traceQuery.data, forecastQuery.data, snapshotQuery.data]);
 
+  const forecastPoints = useMemo(
+    () => chartData.filter((p) => p.isForecast && p.yhat !== null),
+    [chartData]
+  );
+
   const forecastPeak = useMemo(() => {
-    const forecastPoints = chartData.filter((p) => p.isForecast && p.yhat !== null);
     if (!forecastPoints.length) return null;
     return forecastPoints.reduce((max, p) => (p.yhat! > max.yhat! ? p : max));
-  }, [chartData]);
+  }, [forecastPoints]);
 
   const forecastTrend = useMemo(() => {
-    const pts = chartData.filter((p) => p.isForecast && p.yhat !== null);
-    if (pts.length < 2) return null;
-    return pts[pts.length - 1].yhat! - pts[0].yhat!;
-  }, [chartData]);
+    if (forecastPoints.length < 2) return null;
+    return forecastPoints[forecastPoints.length - 1].yhat! - forecastPoints[0].yhat!;
+  }, [forecastPoints]);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ active: false, startX: 0, scrollLeft: 0 });
@@ -293,17 +296,17 @@ export default function ResilienceHistoryPage() {
               label: 'FORECAST PEAK',
               value: forecastPeak ? forecastPeak.yhat!.toFixed(2) : '—',
               sub: forecastPeak?.ds,
-              color: '',
+              color: forecastPeak ? '' : 'text-muted-foreground',
               colorStyle: forecastPeak ? { color: peakBandColor(forecastPeak.yhat!) } : undefined,
               delay: 0.05,
             },
             {
               label: 'TREND · 14D',
-              value: forecastTrend !== null ? `${forecastTrend >= 0 ? '+' : ''}${forecastTrend.toFixed(2)}` : '—',
-              sub: forecastTrend !== null ? (forecastTrend >= 0 ? 'rising' : 'falling') : undefined,
+              value: forecastTrend !== null ? `${forecastTrend > 0 ? '+' : ''}${forecastTrend.toFixed(2)}` : '—',
+              sub: forecastTrend !== null ? (forecastTrend > 0 ? 'rising' : forecastTrend < 0 ? 'falling' : 'flat') : undefined,
               color: '',
               colorStyle: forecastTrend !== null
-                ? { color: forecastTrend >= 0 ? RISK_RED : RISK_GREEN }
+                ? { color: forecastTrend > 0 ? RISK_RED : forecastTrend < 0 ? RISK_GREEN : SNAPSHOT_AMBER }
                 : undefined,
               delay: 0.08,
             },

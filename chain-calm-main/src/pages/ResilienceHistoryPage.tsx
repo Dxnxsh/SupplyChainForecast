@@ -1,5 +1,5 @@
 import { useMemo, useRef, useEffect, useCallback, useState, type MouseEvent } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { useQuery } from '@tanstack/react-query';
 import { Header } from '@/components/layout/Header';
 import {
@@ -18,7 +18,9 @@ import {
   ResponsiveContainer,
   ComposedChart,
   Line,
+  Area,
   ReferenceLine,
+  ReferenceArea,
 } from 'recharts';
 import { api } from '@/lib/api';
 import { mapSupplier } from '@/lib/dataMappers';
@@ -43,7 +45,15 @@ function todayIso(): string {
   return `${year}-${month}-${day}`;
 }
 
+const RISK_GREEN = 'hsl(152, 72%, 42%)';
+const FORECAST_BLUE = 'hsl(200, 85%, 55%)';
+const SNAPSHOT_AMBER = 'hsl(38, 85%, 52%)';
+const RISK_RED = 'hsl(0, 75%, 50%)';
+const BAND_LOW_MAX = 1.5;
+const BAND_MED_MAX = 2.2;
+
 export default function ResilienceHistoryPage() {
+  const shouldReduceMotion = useReducedMotion();
   const suppliersQuery = useQuery({
     queryKey: ['suppliers'],
     queryFn: () => api.getSuppliers(),
@@ -193,37 +203,37 @@ export default function ResilienceHistoryPage() {
         subtitle="14-day XGBoost risk forecast — history and future on one timeline"
       />
 
-      <div className="flex-1 p-6 overflow-auto">
+      <div className="flex-1 p-5 overflow-auto">
         {hasError && (
-          <div className="mb-4 rounded-lg border border-risk-high/40 bg-risk-high/10 px-4 py-3 text-sm text-risk-high">
-            Could not load forecast data from the backend.
+          <div className="mb-4 rounded border border-risk-high/30 bg-risk-high/8 px-3 py-2 text-xs font-mono text-risk-high">
+            BACKEND UNREACHABLE — forecast data unavailable
             {showOverlay && snapshotQuery.isError && (
-              <span className="block mt-1 text-xs opacity-90">
-                For the compare overlay, pick a date with at least two days of historical
-                risk_score for this node, or wait for on-demand generation to finish.
+              <span className="block mt-1 opacity-80">
+                SNAPSHOT: pick a date with ≥2 historical days for this node
               </span>
             )}
           </div>
         )}
 
         {/* Controls */}
-        <div className="flex flex-wrap items-center gap-4 mb-6">
-          <span className="text-sm text-muted-foreground">Select Supplier:</span>
+        <div className="flex flex-wrap items-center gap-3 mb-5">
+          <label className="text-xs font-mono text-muted-foreground tracking-widest uppercase whitespace-nowrap">Node</label>
           <Select value={effectiveSupplierId} onValueChange={setSelectedSupplierId}>
-            <SelectTrigger className="w-64 bg-secondary/50">
+            <SelectTrigger className="h-7 w-56 bg-secondary/50 text-xs font-mono border-border" aria-label="Select supplier">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
               {suppliers.map((supplier) => (
-                <SelectItem key={supplier.id} value={supplier.id}>
+                <SelectItem key={supplier.id} value={supplier.id} className="text-xs font-mono">
                   {supplier.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
 
-          <Button variant="outline" size="sm" onClick={scrollToToday}>
-            Today
+          <Button variant="outline" size="sm" onClick={scrollToToday}
+            className="h-7 px-3 text-xs font-mono tracking-wider">
+            TODAY
           </Button>
 
           <div className="flex items-center gap-2 ml-auto">
@@ -232,15 +242,17 @@ export default function ResilienceHistoryPage() {
               variant={showOverlay ? 'secondary' : 'outline'}
               size="sm"
               onClick={() => setShowOverlay((v) => !v)}
+              className="h-7 px-3 text-xs font-mono tracking-wider"
             >
-              {showOverlay ? 'Hide overlay' : 'Compare snapshot'}
+              {showOverlay ? 'HIDE OVERLAY' : 'COMPARE'}
             </Button>
             {showOverlay && (
               <>
-                <span className="text-sm text-muted-foreground">Origin:</span>
+                <label className="text-xs font-mono text-muted-foreground tracking-widest">ORIGIN</label>
                 <input
                   type="date"
-                  className="h-9 rounded-md border border-border bg-secondary/50 px-3 text-sm text-foreground"
+                  aria-label="Snapshot origin date"
+                  className="h-7 rounded border border-border bg-secondary/50 px-2 text-xs font-mono text-foreground"
                   value={snapshotDate}
                   max={todayStr}
                   onChange={(e) => setSnapshotDate(e.target.value)}
@@ -250,87 +262,72 @@ export default function ResilienceHistoryPage() {
           </div>
 
           {isLoading && (
-            <span className="text-sm text-muted-foreground">Loading…</span>
+            <span className="text-xs font-mono text-muted-foreground animate-pulse">LOADING…</span>
           )}
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="glass-card rounded-xl p-5"
-          >
-            <p className="text-sm text-muted-foreground">Current exposure (live)</p>
-            <p className="text-3xl font-bold text-risk-high mt-1">
-              {selectedSupplier?.riskScore}%
-            </p>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="glass-card rounded-xl p-5"
-          >
-            <p className="text-sm text-muted-foreground">Forecast peak</p>
-            {forecastPeak ? (
-              <>
-                <p className="text-3xl font-bold text-primary mt-1">
-                  {forecastPeak.yhat!.toFixed(1)}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">{forecastPeak.ds}</p>
-              </>
-            ) : (
-              <p className="text-3xl font-bold text-muted-foreground mt-1">—</p>
-            )}
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="glass-card rounded-xl p-5"
-          >
-            <p className="text-sm text-muted-foreground">MAE (snapshot overlay)</p>
-            <p className="text-3xl font-bold text-primary mt-1">
-              {snapshotQuery.data?.mae != null ? snapshotQuery.data.mae.toFixed(2) : '—'}
-            </p>
-            {snapshotQuery.data && (
-              <p className="text-xs text-muted-foreground mt-1">
-                {snapshotQuery.data.completed_days} / {snapshotQuery.data.horizon_days} days
-                {snapshotQuery.data.generated_on_demand ? ' · computed on demand' : ''}
-              </p>
-            )}
-          </motion.div>
+        {/* Stats — horizontal strip matching the map page */}
+        <div className="grid grid-cols-3 gap-px bg-border rounded overflow-hidden mb-5">
+          {[
+            {
+              label: 'EXPOSURE · LIVE',
+              value: selectedSupplier?.riskScore != null ? `${selectedSupplier.riskScore}%` : '—',
+              color: 'text-risk-high',
+              delay: 0,
+            },
+            {
+              label: 'FORECAST PEAK',
+              value: forecastPeak ? forecastPeak.yhat!.toFixed(1) : '—',
+              sub: forecastPeak?.ds,
+              color: 'text-primary',
+              delay: 0.05,
+            },
+            {
+              label: 'MAE · SNAPSHOT',
+              value: snapshotQuery.data?.mae != null ? snapshotQuery.data.mae.toFixed(2) : '—',
+              sub: snapshotQuery.data
+                ? `${snapshotQuery.data.completed_days}/${snapshotQuery.data.horizon_days} days${snapshotQuery.data.generated_on_demand ? ' · on demand' : ''}`
+                : undefined,
+              color: 'text-primary',
+              delay: 0.1,
+            },
+          ].map(({ label, value, sub, color, delay }) => (
+            <motion.div
+              key={label}
+              initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={shouldReduceMotion ? {} : { delay, duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
+              className="bg-card px-4 py-3"
+            >
+              <p className="text-xs font-mono text-muted-foreground tracking-widest">{label}</p>
+              <p className={`text-4xl font-bold font-mono tabular-nums leading-none mt-1 ${color}`}>{value}</p>
+              {sub && <p className="text-xs font-mono text-muted-foreground mt-1.5">{sub}</p>}
+            </motion.div>
+          ))}
         </div>
 
         {/* Chart */}
         <motion.div
-          initial={{ opacity: 0, scale: 0.98 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="glass-card rounded-xl p-5"
+          initial={shouldReduceMotion ? false : { opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.2, ease: [0.25, 1, 0.5, 1] }}
+          className="bg-card border border-border rounded p-4"
         >
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-foreground">
-              Risk Timeline — scroll left for history, right for forecast
-            </h3>
-            {/* Static legend outside the scrollable area */}
-            <div className="flex items-center gap-4 text-xs text-muted-foreground shrink-0">
-              <span className="flex items-center gap-1.5">
-                <span style={{ display: 'inline-block', width: 16, height: 2, background: 'hsl(142, 70%, 45%)', borderRadius: 1 }} />
-                Realized avg risk
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span style={{ display: 'inline-block', width: 16, height: 2, background: 'hsl(250, 60%, 60%)', borderRadius: 1 }} />
-                Predicted (XGBoost)
-              </span>
-              {showOverlay && (
-                <span className="flex items-center gap-1.5">
-                  <span style={{ display: 'inline-block', width: 16, height: 2, background: 'hsl(30, 80%, 55%)', borderRadius: 1, borderTop: '2px dashed hsl(30, 80%, 55%)' }} />
-                  Snapshot ({snapshotDate})
+            <span className="text-xs font-mono text-muted-foreground tracking-widest uppercase">
+              Risk Timeline — drag to scroll
+            </span>
+            <div className="flex items-center gap-4 shrink-0">
+              {[
+                { color: RISK_GREEN, label: 'REALIZED' },
+                { color: FORECAST_BLUE, label: 'XGBOOST' },
+                ...(showOverlay ? [{ color: SNAPSHOT_AMBER, label: `SNAP ${snapshotDate}` }] : []),
+              ].map(({ color, label }) => (
+                <span key={label} className="flex items-center gap-1.5">
+                  <span style={{ display: 'inline-block', width: 12, height: 2, background: color, borderRadius: 1 }} />
+                  <span className="text-xs font-mono text-muted-foreground tracking-wider">{label}</span>
                 </span>
-              )}
+              ))}
             </div>
           </div>
 
@@ -346,89 +343,94 @@ export default function ResilienceHistoryPage() {
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={chartData} margin={{ top: 8, right: 24, left: 0, bottom: 0 }}>
                   <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke="hsl(217, 33%, 18%)"
+                    strokeDasharray="2 4"
+                    stroke="hsl(240, 5%, 15%)"
                     vertical={false}
                   />
+                  {/* Risk zone bands — low / medium / high calibrated to yhat range */}
+                  <ReferenceArea y1={0} y2={BAND_LOW_MAX} fill={RISK_GREEN} fillOpacity={0.05} ifOverflow="visible" />
+                  <ReferenceArea y1={BAND_LOW_MAX} y2={BAND_MED_MAX} fill={SNAPSHOT_AMBER} fillOpacity={0.05} ifOverflow="visible" />
+                  <ReferenceArea y1={BAND_MED_MAX} fill={RISK_RED} fillOpacity={0.05} ifOverflow="visible" />
                   <XAxis
                     dataKey="ds"
-                    stroke="hsl(215, 20%, 55%)"
-                    tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 11 }}
-                    tickFormatter={(v) => String(v).slice(5)}
+                    stroke="hsl(240, 5%, 28%)"
+                    tick={{ fill: 'hsl(240, 5%, 40%)', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}
+                    tickFormatter={(v) => {
+                      const d = new Date(String(v));
+                      return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                    }}
                     tickLine={false}
                     axisLine={false}
                     dy={8}
                     interval={2}
                   />
                   <YAxis
-                    stroke="hsl(215, 20%, 55%)"
-                    tick={{ fill: 'hsl(215, 20%, 55%)', fontSize: 11 }}
-                    domain={[0, 'auto']}
+                    stroke="hsl(240, 5%, 28%)"
+                    tick={{ fill: 'hsl(240, 5%, 40%)', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}
+                    domain={['auto', 'auto']}
                     tickLine={false}
                     axisLine={false}
                     dx={-8}
-                    width={40}
+                    width={36}
                   />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: 'hsl(222, 47%, 10%)',
-                      border: '1px solid hsl(217, 33%, 18%)',
-                      borderRadius: '8px',
-                      color: 'hsl(210, 40%, 98%)',
+                      backgroundColor: 'hsl(240, 7%, 8%)',
+                      border: '1px solid hsl(240, 5%, 18%)',
+                      borderRadius: '3px',
+                      color: 'hsl(40, 20%, 92%)',
+                      fontFamily: 'JetBrains Mono, monospace',
+                      fontSize: '11px',
                     }}
-                    itemStyle={{ color: 'hsl(210, 40%, 98%)' }}
-                    labelStyle={{ color: 'hsl(215, 20%, 65%)', marginBottom: '6px' }}
+                    itemStyle={{ color: 'hsl(40, 20%, 92%)' }}
+                    labelStyle={{ color: 'hsl(240, 5%, 50%)', marginBottom: '4px', fontSize: '10px' }}
                     formatter={(value: number | null, name: string) =>
                       value != null ? [value.toFixed(2), name] : [null, name]
                     }
                   />
 
-                  {/* Realized history — green */}
+                  {/* Confidence interval — filled band behind the lines */}
+                  <Area
+                    type="monotone"
+                    dataKey="yhat_upper"
+                    stroke="none"
+                    fill={FORECAST_BLUE}
+                    fillOpacity={0.08}
+                    legendType="none"
+                    connectNulls={false}
+                    activeDot={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="yhat_lower"
+                    stroke="none"
+                    fill={FORECAST_BLUE}
+                    fillOpacity={0}
+                    legendType="none"
+                    connectNulls={false}
+                    activeDot={false}
+                  />
+
+                  {/* Realized history */}
                   <Line
                     type="monotone"
                     dataKey="y_actual"
                     name="Realized avg risk"
-                    stroke="hsl(142, 70%, 45%)"
+                    stroke={RISK_GREEN}
                     strokeWidth={2}
                     dot={false}
                     connectNulls
                   />
 
-                  {/* XGBoost predicted — purple (runs through history AND future) */}
+                  {/* XGBoost predicted — primary blue */}
                   <Line
                     type="monotone"
                     dataKey="yhat"
                     name="Predicted (XGBoost)"
-                    stroke="hsl(250, 60%, 60%)"
+                    stroke={FORECAST_BLUE}
                     strokeWidth={2}
                     dot={false}
                     connectNulls
-                  />
-
-                  {/* Confidence bound lines — dotted */}
-                  <Line
-                    type="monotone"
-                    dataKey="yhat_upper"
-                    name="Upper bound"
-                    stroke="hsl(250, 60%, 60%)"
-                    strokeWidth={1}
-                    strokeDasharray="3 3"
-                    strokeOpacity={0.5}
-                    dot={false}
-                    legendType="none"
-                    connectNulls={false}
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="yhat_lower"
-                    name="Lower bound"
-                    stroke="hsl(250, 60%, 60%)"
-                    strokeWidth={1}
-                    strokeDasharray="3 3"
-                    strokeOpacity={0.5}
-                    dot={false}
-                    legendType="none"
-                    connectNulls={false}
                   />
 
                   {/* Compare overlay */}
@@ -437,7 +439,7 @@ export default function ResilienceHistoryPage() {
                       type="monotone"
                       dataKey="snapshot_yhat"
                       name={`Snapshot (${snapshotDate})`}
-                      stroke="hsl(30, 80%, 55%)"
+                      stroke={SNAPSHOT_AMBER}
                       strokeWidth={1.5}
                       strokeDasharray="5 3"
                       dot={false}
@@ -448,13 +450,14 @@ export default function ResilienceHistoryPage() {
                   {/* Today marker */}
                   <ReferenceLine
                     x={todayStr}
-                    stroke="hsl(215, 20%, 55%)"
-                    strokeDasharray="3 3"
+                    stroke="hsl(240, 5%, 35%)"
+                    strokeDasharray="2 4"
                     label={{
-                      value: 'Today',
+                      value: 'TODAY',
                       position: 'insideTopRight',
-                      fill: 'hsl(215, 20%, 65%)',
-                      fontSize: 11,
+                      fill: 'hsl(240, 5%, 45%)',
+                      fontSize: 9,
+                      fontFamily: 'JetBrains Mono, monospace',
                     }}
                   />
                 </ComposedChart>

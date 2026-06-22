@@ -105,6 +105,8 @@ def entries_to_scored_events(
         pred_labels = preds
         classes = [str(c) for c in model.classes_]
 
+    ML_TO_RISK = {"HIGH": 85.0, "MEDIUM": 45.0, "LOW": 15.0}
+
     print("Mapping scores back to events...")
     for idx, ev in enumerate(events):
         pred_label = str(pred_labels[idx])
@@ -115,6 +117,7 @@ def entries_to_scored_events(
         ev["ml_risk_label"] = pred_label
         ev["ml_risk_confidence"] = confidence
         ev["ml_risk_probabilities"] = prob_map
+        ev["risk_score"] = ML_TO_RISK.get(pred_label.upper(), 0.0)
 
     return events
 
@@ -167,6 +170,29 @@ def validate_two_stage_artifacts(
     return report
 
 
+def _ckpt_path(checkpoint_dir: str, run_id: str, step: str) -> Path:
+    return Path(checkpoint_dir) / run_id / f"{step}.jsonl"
+
+
+def _save_checkpoint(checkpoint_dir: str, run_id: str, step: str, events: list[dict]) -> None:
+    p = _ckpt_path(checkpoint_dir, run_id, step)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
+        for ev in events:
+            f.write(json.dumps(ev, ensure_ascii=False, default=str) + "\n")
+    print(f"💾 Checkpoint saved: {p} ({len(events)} events)")
+
+
+def _load_checkpoint(checkpoint_dir: str, run_id: str, step: str) -> list[dict] | None:
+    p = _ckpt_path(checkpoint_dir, run_id, step)
+    if not p.exists():
+        return None
+    with open(p, encoding="utf-8") as f:
+        events = [json.loads(line) for line in f if line.strip()]
+    print(f"♻️  Resumed from checkpoint: {p} ({len(events)} events)")
+    return events
+
+
 def run_json_ingest(
     raw_dir: str,
     *,
@@ -178,7 +204,11 @@ def run_json_ingest(
     skip_temporal: bool = False,
     regenerate_forecasts: bool = True,
     reprocess_all: bool = False,
+    run_id: str = "default",
+    checkpoint_dir: str | None = None,
 ) -> int:
+    ckpt = checkpoint_dir or os.getenv("CHECKPOINT_DIR", "")
+
     from src.rss_ingest import (
         enrich_events_for_db,
         load_classifier,
@@ -186,45 +216,69 @@ def run_json_ingest(
         load_impact_regressor,
     )
 
-    entries = load_web_scrape_entries(raw_dir)
-    if not entries:
-        print(f"No entries loaded from {raw_dir}")
-        return 0
+    # ── Step 1: score ────────────────────────────────────────────────────────
+    batch = _load_checkpoint(ckpt, run_id, "01_scored") if ckpt else None
+    if batch is None:
+        entries = load_web_scrape_entries(raw_dir)
+        if not entries:
+            print(f"No entries loaded from {raw_dir}")
+            return 0
 
-    vectorizer, model, label_encoder = load_classifier(legacy_model_path)
-    disruption_payload = load_disruption_classifier(disruption_model_path)
-    if disruption_model_path and not disruption_payload:
-        print(f"⚠️ Disruption classifier not found at {disruption_model_path}; continuing without it.")
-    impact_payload = load_impact_regressor(impact_model_path)
-    if impact_model_path and not impact_payload:
-        print(f"⚠️ Impact regressor not found at {impact_model_path}; continuing without it.")
+        vectorizer, model, label_encoder = load_classifier(legacy_model_path)
+        batch = entries_to_scored_events(entries, vectorizer, model, label_encoder, limit=limit)
+        print(f"Scored {len(batch)} article(s) from JSON (legacy tri-class).")
 
-    batch = entries_to_scored_events(entries, vectorizer, model, label_encoder, limit=limit)
-    print(f"Scored {len(batch)} article(s) from JSON (legacy tri-class).")
+        engine_tmp = None
+        if batch and not reprocess_all:
+            from src.load_to_db import filter_new_events_by_url, get_db_engine
+            engine_tmp = get_db_engine()
+            if engine_tmp:
+                batch, nskip = filter_new_events_by_url(engine_tmp, batch)
+                if nskip:
+                    print(f"Skipped {nskip} item(s) already in database (by article_url).")
 
-    engine = None
-    if batch and not reprocess_all:
-        from src.load_to_db import filter_new_events_by_url, get_db_engine
+        if not batch:
+            print("No items to enrich (empty batch or all duplicates).")
+            return 0
 
-        engine = get_db_engine()
-        if engine:
-            batch, nskip = filter_new_events_by_url(engine, batch)
-            if nskip:
-                print(f"Skipped {nskip} item(s) already in database (by article_url).")
+        if ckpt:
+            _save_checkpoint(ckpt, run_id, "01_scored", batch)
 
-    if not batch:
-        print("No items to enrich (empty batch or all duplicates).")
-        return 0
+    # ── Step 2a: enrich without temporal (NER + geocode + FinBERT + disruption/impact) ──
+    pre_temporal = _load_checkpoint(ckpt, run_id, "02a_pre_temporal") if ckpt else None
+    if pre_temporal is None:
+        disruption_payload = load_disruption_classifier(disruption_model_path)
+        if disruption_model_path and not disruption_payload:
+            print(f"⚠️ Disruption classifier not found at {disruption_model_path}; continuing without it.")
+        impact_payload = load_impact_regressor(impact_model_path)
+        if impact_model_path and not impact_payload:
+            print(f"⚠️ Impact regressor not found at {impact_model_path}; continuing without it.")
 
-    print(f"Running enrichment on {len(batch)} item(s)...")
-    enrich_events_for_db(
-        batch,
-        disruption_payload,
-        impact_payload,
-        is_background=False,
-        skip_temporal=skip_temporal,
-        verbose=True,
-    )
+        print(f"Running enrichment on {len(batch)} item(s)...")
+        enrich_events_for_db(
+            batch,
+            disruption_payload,
+            impact_payload,
+            is_background=False,
+            skip_temporal=True,
+            verbose=True,
+        )
+        if ckpt:
+            _save_checkpoint(ckpt, run_id, "02a_pre_temporal", batch)
+    else:
+        batch = pre_temporal
+
+    # ── Step 2b: temporal enrichment ─────────────────────────────────────────
+    enriched = _load_checkpoint(ckpt, run_id, "02_enriched") if ckpt else None
+    if enriched is None:
+        if not skip_temporal:
+            from src.temporal_extraction import enrich_events_with_temporal_data
+            batch[:] = enrich_events_with_temporal_data(batch)
+        enriched = batch
+        if ckpt:
+            _save_checkpoint(ckpt, run_id, "02_enriched", enriched)
+    else:
+        batch = enriched
 
     if skip_db:
         for ev in batch[: min(20, len(batch))]:
@@ -239,10 +293,10 @@ def run_json_ingest(
         print(f"Dry-run / skip-db: not writing database ({len(batch)} events).")
         return len(batch)
 
-    from src.load_to_db import create_tables, get_db_engine, get_all_events, upsert_events
+    # ── Step 3: DB write ─────────────────────────────────────────────────────
+    from src.load_to_db import create_tables, get_db_engine, upsert_events
 
-    if engine is None:
-        engine = get_db_engine()
+    engine = get_db_engine()
     if not engine:
         print("❌ Database engine not available.")
         return 0

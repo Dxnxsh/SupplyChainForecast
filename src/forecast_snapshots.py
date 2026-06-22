@@ -384,11 +384,14 @@ def fetch_actuals_for_horizon(
     h_max = max(horizon_days)
     q = text(
         """
-        SELECT article_timestamp::date AS ds, COALESCE(AVG(risk_score), 0)::double precision AS y
+        SELECT article_timestamp::date AS ds,
+               COALESCE(AVG(
+                   LEAST(100.0, COALESCE(predicted_impact_score::double precision / 3.0, risk_score::double precision))
+               ), 0)::double precision AS y
         FROM events
         WHERE matched_node @> jsonb_build_array(:node_name)
           AND article_timestamp IS NOT NULL
-          AND risk_score IS NOT NULL
+          AND (risk_score IS NOT NULL OR predicted_impact_score IS NOT NULL)
           AND article_timestamp::date >= :h_min
           AND article_timestamp::date <= :h_max
         GROUP BY ds

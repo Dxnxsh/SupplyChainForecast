@@ -419,7 +419,7 @@ def train():
     pos_mask = y_binary == 1
     X_pos = X[pos_mask]
     y_pos = y_risk[pos_mask]
-    logger.info(f"Training Stage 2 (regressor) on {pos_mask.sum()} positive samples...")
+    logger.info(f"Training Stage 2 (Mean regressor) on {pos_mask.sum()} positive samples...")
 
     reg = xgb.XGBRegressor(
         n_estimators=200,
@@ -429,8 +429,19 @@ def train():
     )
     reg.fit(X_pos, y_pos)
 
-    # Compute confidence intervals (per-node error quantiles)
-    logger.info("Computing confidence intervals...")
+    logger.info(f"Training Stage 2 (Q75 quantile regressor) on {pos_mask.sum()} positive samples...")
+    reg_q75 = xgb.XGBRegressor(
+        n_estimators=200,
+        max_depth=5,
+        learning_rate=0.1,
+        random_state=42,
+        objective="reg:quantileerror",
+        quantile_alpha=0.75,
+    )
+    reg_q75.fit(X_pos, y_pos)
+
+    # Compute confidence intervals (per-node error quantiles) for Mean model
+    logger.info("Computing confidence intervals for Mean model...")
     base_data = all_data[all_data["day_offset"] == 0].copy()
     X_base = base_data[FEATURE_COLUMNS].fillna(0).astype(float)
     p_event = clf.predict_proba(X_base)[:, 1]
@@ -439,24 +450,52 @@ def train():
     actual = base_data["avg_risk"].values * base_data["has_event"].values
     errors = np.abs(predicted - actual)
 
-    base_data = base_data.copy()
-    base_data["abs_error"] = errors
+    base_data_mean = base_data.copy()
+    base_data_mean["abs_error"] = errors
     intervals = {}
     for node in nodes:
-        node_errors = base_data[base_data["node_name"] == node]["abs_error"]
+        node_errors = base_data_mean[base_data_mean["node_name"] == node]["abs_error"]
         if len(node_errors) > 0:
             intervals[node] = float(np.percentile(node_errors, 80))
         else:
             intervals[node] = float(np.percentile(errors, 80))
     intervals["__global__"] = float(np.percentile(errors, 80))
 
+    # Compute confidence intervals (per-node error quantiles) for Q75 model
+    logger.info("Computing confidence intervals for Q75 model...")
+    severity_q75 = reg_q75.predict(X_base)
+    predicted_q75 = p_event * severity_q75
+    errors_q75 = np.abs(predicted_q75 - actual)
+
+    base_data_q75 = base_data.copy()
+    base_data_q75["abs_error"] = errors_q75
+    intervals_q75 = {}
+    for node in nodes:
+        node_errors = base_data_q75[base_data_q75["node_name"] == node]["abs_error"]
+        if len(node_errors) > 0:
+            intervals_q75[node] = float(np.percentile(node_errors, 80))
+        else:
+            intervals_q75[node] = float(np.percentile(errors_q75, 80))
+    intervals_q75["__global__"] = float(np.percentile(errors_q75, 80))
+
     # Save models
     os.makedirs("models", exist_ok=True)
     clf.save_model("models/forecast_event_prob.json")
+    
+    # Save Mean models
     reg.save_model("models/forecast_severity.json")
+    reg.save_model("models/forecast_severity_mean.json")
     with open("models/forecast_intervals.json", "w") as f:
         json.dump(intervals, f, indent=2)
-    logger.info("Models saved to models/forecast_event_prob.json, forecast_severity.json, forecast_intervals.json")
+    with open("models/forecast_intervals_mean.json", "w") as f:
+        json.dump(intervals, f, indent=2)
+        
+    # Save Q75 models
+    reg_q75.save_model("models/forecast_severity_q75.json")
+    with open("models/forecast_intervals_q75.json", "w") as f:
+        json.dump(intervals_q75, f, indent=2)
+        
+    logger.info("Models saved successfully (both Mean and Q75 variants).")
 
     # Backtest report
     logger.info("\n=== BACKTEST REPORT ===")

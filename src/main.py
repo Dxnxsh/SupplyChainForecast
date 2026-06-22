@@ -1,5 +1,11 @@
 # src/main.py
 
+# torch MUST be imported before xgboost on macOS.
+# xgboost loads its own libomp dylib; if it initialises first it corrupts the
+# OpenMP state that PyTorch relies on, causing a segfault when any
+# nn.TransformerEncoderLayer (used inside GLiNER2) is instantiated.
+import torch as _torch  # noqa: F401 — import order guard, do not move
+
 from fastapi import FastAPI, HTTPException, Depends, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -174,6 +180,16 @@ async def lifespan(app: FastAPI):
             logger.info("✅ forecast_snapshots table ensured.")
         except Exception as e:
             logger.error("Could not ensure forecast_snapshots table: %s", e, exc_info=True)
+    # Pre-load GLiNER2 on the main thread before the background worker starts.
+    # SentencePiece (used by DeBERTa tokenizer) deadlocks / segfaults when first
+    # initialized from a non-main thread on macOS — loading it here ensures the
+    # model is already in memory when the worker calls extract_locations_batch.
+    try:
+        from src.preprocessing import get_ner_pipeline
+        get_ner_pipeline()
+        logger.info("✅ GLiNER2 NER model pre-loaded on main thread.")
+    except Exception as e:
+        logger.warning("GLiNER2 pre-load failed (NER will retry in worker): %s", e)
     worker_thread = threading.Thread(target=rss_ingest_worker, daemon=True)
     worker_thread.start()
     yield
@@ -713,6 +729,13 @@ def trigger_rss_ingest(background_tasks: BackgroundTasks):
     disruption_model_path = os.getenv("DISRUPTION_CLASSIFIER_PATH", str(PROJECT_ROOT / "model_training" / "disruption_classifier.pkl"))
     impact_model_path = os.getenv("IMPACT_REGRESSOR_PATH", str(PROJECT_ROOT / "model_training" / "impact_regressor_v2.pkl"))
     
+    # Ensure GLiNER2 is loaded on this (main) thread before handing off to the
+    # background thread — SentencePiece deadlocks on first init in non-main threads.
+    try:
+        from src.preprocessing import get_ner_pipeline
+        get_ner_pipeline()
+    except Exception:
+        pass
     # Run the ingestion in the background so we don't block the API response
     background_tasks.add_task(
         run_once,

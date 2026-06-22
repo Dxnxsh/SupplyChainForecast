@@ -1,7 +1,14 @@
 # src/preprocessing.py
 
-import json
 import os
+from dotenv import load_dotenv
+# Load environment variables at the absolute top before any ML imports
+load_dotenv()
+
+# Explicitly disable Rust tokenizer parallelism to prevent asyncio/uvicorn deadlocks in background workers
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+import json
 import pickle
 import re
 import time
@@ -16,6 +23,8 @@ from gliner2 import GLiNER2
 
 # --- Performance Configuration ---
 NER_BATCH_SIZE = int(os.getenv("NER_BATCH_SIZE", "32"))
+# GLiNER2 attention matrices scale quadratically with token count; truncate inputs to cap peak VRAM.
+NER_MAX_CHARS = int(os.getenv("NER_MAX_CHARS", "1000"))
 ML_CLASSIFIER_PATH = os.getenv("ML_CLASSIFIER_PATH", "model_training/classifier.pkl")
 _GLINER_MODEL_ID = os.getenv("GLINER_MODEL", "fastino/gliner2-base-v1")
 _GLINER_LABEL = "location"
@@ -34,7 +43,7 @@ def _select_torch_device():
     """
     forced = (os.getenv("TORCH_DEVICE") or "").strip().lower()
     if forced == "cpu":
-        return -1, "cpu"
+        return "cpu", "cpu"
     if forced == "cuda":
         if torch.cuda.is_available():
             return 0, "cuda"
@@ -47,7 +56,7 @@ def _select_torch_device():
         return 0, "cuda"
     if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
         return "mps", "mps"
-    return -1, "cpu"
+    return "cpu", "cpu"
 
 
 def load_ml_classifier(model_path=ML_CLASSIFIER_PATH):
@@ -86,15 +95,58 @@ def load_ml_classifier(model_path=ML_CLASSIFIER_PATH):
 
 _gliner_model = None
 
+def _resolve_gliner_model_path(model_id: str) -> str:
+    """Return a local snapshot path if the model is cached, else return model_id for HF download."""
+    try:
+        from huggingface_hub import try_to_load_from_cache, HUGGINGFACE_HUB_CACHE
+        snapshot_path = try_to_load_from_cache(model_id, "config.json")
+        if snapshot_path and os.path.isfile(snapshot_path):
+            local_dir = os.path.dirname(snapshot_path)
+            return local_dir
+    except Exception:
+        pass
+    return model_id
+
+
 def get_ner_pipeline():
     """Lazily load the GLiNER2 model for zero-shot NER."""
     global _gliner_model
     if _gliner_model is None:
         try:
             ner_device, ner_device_name = _select_torch_device()
+            model_path = _resolve_gliner_model_path(_GLINER_MODEL_ID)
             print(f"Loading GLiNER2 model ({_GLINER_MODEL_ID})...")
-            model = GLiNER2.from_pretrained(_GLINER_MODEL_ID)
-            model = model.to(ner_device)
+            # Force offline mode when model is already cached to avoid network hangs.
+            # transformers' AutoTokenizer/AutoConfig still hit HF even with a local dir.
+            _is_local = model_path != _GLINER_MODEL_ID
+            _prev_hf = os.environ.get("HF_HUB_OFFLINE")
+            _prev_tr = os.environ.get("TRANSFORMERS_OFFLINE")
+            if _is_local:
+                os.environ["HF_HUB_OFFLINE"] = "1"
+                os.environ["TRANSFORMERS_OFFLINE"] = "1"
+            try:
+                model = GLiNER2.from_pretrained(model_path)
+            finally:
+                if _is_local:
+                    if _prev_hf is None:
+                        os.environ.pop("HF_HUB_OFFLINE", None)
+                    else:
+                        os.environ["HF_HUB_OFFLINE"] = _prev_hf
+                    if _prev_tr is None:
+                        os.environ.pop("TRANSFORMERS_OFFLINE", None)
+                    else:
+                        os.environ["TRANSFORMERS_OFFLINE"] = _prev_tr
+            # MPS has known init issues with DeBERTa-based models on Apple Silicon;
+            # fall back to CPU if the move fails.
+            try:
+                model = model.to(ner_device)
+            except Exception as mps_err:
+                if ner_device_name == "mps":
+                    print(f"⚠️ MPS transfer failed ({mps_err}); falling back to CPU for GLiNER2.")
+                    ner_device, ner_device_name = "cpu", "cpu"
+                    model = model.to(ner_device)
+                else:
+                    raise
             _gliner_model = model
             if ner_device_name == "mps":
                 print(
@@ -278,29 +330,31 @@ def extract_locations_batch(texts):
         labels = [_GLINER_LABEL]
 
         all_locations = []
+        _cuda = torch.cuda.is_available()
+        _mps = not _cuda and hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+        if _cuda:
+            _total_gb = torch.cuda.get_device_properties(0).total_memory / 1024**3
+
         pbar = tqdm(
             range(0, len(texts), NER_BATCH_SIZE),
             desc="Step 2/5: Extracting Locations (NER)",
         )
         for i in pbar:
-            batch = [t or "" for t in texts[i:i + NER_BATCH_SIZE]]
+            batch = [(t or "")[:NER_MAX_CHARS] for t in texts[i:i + NER_BATCH_SIZE]]
             batch_results = model.batch_extract_entities(batch, labels)
             for result in batch_results:
                 locs = result.get("entities", {}).get(_GLINER_LABEL, [])
                 all_locations.append(locs)
-            
-            # Display GPU VRAM metrics dynamically
+
             try:
-                if torch.cuda.is_available():
-                    alloc = torch.cuda.memory_allocated() / (1024**3)
-                    res = torch.cuda.memory_reserved() / (1024**3)
-                    pbar.set_postfix({"vram": f"{alloc:.2f}/{res:.2f}GB"})
-                elif hasattr(torch, "mps") and torch.backends.mps.is_available():
-                    try:
-                        alloc = torch.mps.current_allocated_memory() / (1024**3)
-                        pbar.set_postfix({"vram": f"{alloc:.2f}GB"})
-                    except Exception:
-                        pass
+                if _cuda:
+                    torch.cuda.empty_cache()
+                    alloc = torch.cuda.memory_allocated() / 1024**3
+                    free = _total_gb - torch.cuda.memory_reserved() / 1024**3
+                    pbar.set_postfix({"alloc": f"{alloc:.2f}G", "free": f"{free:.2f}G", "tot": f"{_total_gb:.2f}G"})
+                elif _mps:
+                    alloc = torch.mps.current_allocated_memory() / 1024**3
+                    pbar.set_postfix({"mps_alloc": f"{alloc:.2f}G"})
             except Exception:
                 pass
         return all_locations

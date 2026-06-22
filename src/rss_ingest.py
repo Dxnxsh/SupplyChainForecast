@@ -26,6 +26,7 @@ import gc
 from email.utils import parsedate_to_datetime
 from pathlib import Path
 
+import torch
 import numpy as np
 from scipy import sparse
 
@@ -281,9 +282,13 @@ def apply_batch_disruption_and_impact(events: list[dict]) -> None:
             SUPPLIER_NODES = {}
         for ev in events:
             node = ev.get("matched_node")
-            ev["node_criticality"] = (
-                SUPPLIER_NODES.get(node, {}).get("criticality", 1) if node else 1
-            )
+            if isinstance(node, list):
+                if node:
+                    ev["node_criticality"] = max([SUPPLIER_NODES.get(n, {}).get("criticality", 1) for n in node if n])
+                else:
+                    ev["node_criticality"] = 1
+            else:
+                ev["node_criticality"] = SUPPLIER_NODES.get(node, {}).get("criticality", 1) if node else 1
         if disruption_payload:
             attach_disruption_probabilities(events, disruption_payload)
         if impact_payload:
@@ -462,6 +467,29 @@ def enrich_events_for_db(
         update_status(current_step="Extracting geographic locations via NER...", progress_percent=50)
 
     log(f"[enrich] 2/5 NER locations (batch size {NER_BATCH_SIZE}, device see preprocessing startup)")
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(0)
+        total_gb = props.total_memory / 1024**3
+        alloc_gb = torch.cuda.memory_allocated() / 1024**3
+        reserv_gb = torch.cuda.memory_reserved() / 1024**3
+        free_gb = total_gb - reserv_gb
+        log(
+            f"[enrich] VRAM before NER: allocated={alloc_gb:.2f}GB  reserved={reserv_gb:.2f}GB  "
+            f"free≈{free_gb:.2f}GB  total={total_gb:.2f}GB"
+        )
+        tensor_sizes: dict[str, float] = {}
+        for obj in gc.get_objects():
+            try:
+                if torch.is_tensor(obj) and obj.is_cuda:
+                    key = f"{type(obj).__name__} {tuple(obj.shape)} {obj.dtype}"
+                    tensor_sizes[key] = tensor_sizes.get(key, 0) + obj.element_size() * obj.nelement() / 1024**2
+            except Exception:
+                pass
+        if tensor_sizes:
+            top = sorted(tensor_sizes.items(), key=lambda x: x[1], reverse=True)[:10]
+            log("[enrich] Top CUDA tensors by MB:")
+            for name, mb in top:
+                log(f"[enrich]   {mb:8.1f} MB  {name}")
     texts_for_ner = [ev["event_text_segment"] for ev in batch]
     locations_batch = extract_locations_batch(texts_for_ner)
     for ev, locs in zip(batch, locations_batch):
@@ -518,10 +546,15 @@ def enrich_events_for_db(
 
             for ev in batch:
                 node = ev.get("matched_node")
-                ev["node_criticality"] = (
-                    SUPPLIER_NODES.get(node, {}).get("criticality", 1) if node else 1
-                )
-        except Exception:
+                if isinstance(node, list):
+                    if node:
+                        ev["node_criticality"] = max([SUPPLIER_NODES.get(n, {}).get("criticality", 1) for n in node if n])
+                    else:
+                        ev["node_criticality"] = 1
+                else:
+                    ev["node_criticality"] = SUPPLIER_NODES.get(node, {}).get("criticality", 1) if node else 1
+        except Exception as exc:
+            print(f"⚠️ Failed to populate node_criticality: {exc}")
             for ev in batch:
                 ev["node_criticality"] = 1
 

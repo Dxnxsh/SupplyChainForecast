@@ -10,9 +10,9 @@ const riskLevelFromScore = (score: number): RiskLevel => {
 
 /** Buckets for supplier node exposure (0–100 roll-up). Wider than event scores so the map is not all red when many nodes sit in the 70–95 range. */
 const supplierExposureLevel = (exposure: number): RiskLevel => {
-  if (exposure <= 42) return 'low';
-  if (exposure <= 68) return 'medium';
-  if (exposure <= 86) return 'high';
+  if (exposure <= 8) return 'low';
+  if (exposure <= 18) return 'medium';
+  if (exposure <= 30) return 'high';
   return 'critical';
 };
 

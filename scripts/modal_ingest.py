@@ -12,6 +12,11 @@ skip_nominatim = os.getenv("SKIP_NOMINATIM", "0")
 # Define the Modal App
 app = modal.App("supply-chain-ingest-pipeline")
 
+# Persistent volume — survives between runs.
+# Sync to local Mac:  modal volume get supply-chain-checkpoints /checkpoint ./data/checkpoints
+checkpoint_volume = modal.Volume.from_name("supply-chain-checkpoints", create_if_missing=True)
+CHECKPOINT_DIR = "/checkpoint"
+
 # Create a container image with all local dependencies
 image = (
     modal.Image.debian_slim(python_version="3.11")
@@ -25,7 +30,7 @@ image = (
         "torch==2.6.0",
         "transformers==4.57.0",
         "gliner2",
-        "spacy==3.7.4",
+        "spacy[cuda12x]==3.7.4",
         "psycopg2-binary==2.9.10",
         "SQLAlchemy==2.0.44",
         "geopy==2.4.1",
@@ -44,34 +49,33 @@ image = (
 
 @app.function(
     image=image,
-    gpu="A100",      # Can be "A10G", "RTX4090", or "A100"
+    gpu="A100",
     secrets=[modal.Secret.from_dict({
         "DB_CONNECTION_STRING": db_conn or "",
         "SKIP_NOMINATIM": skip_nominatim
     })],
     env={
         "NER_BATCH_SIZE": "256",
-        "FINBERT_BATCH_SIZE": "256"
+        "FINBERT_BATCH_SIZE": "256",
+        "SPACY_BATCH_SIZE": "1024",
+        "CHECKPOINT_DIR": CHECKPOINT_DIR,
     },
-    timeout=86400    # Allow up to 24 hours execution
+    volumes={CHECKPOINT_DIR: checkpoint_volume},
+    timeout=86400
 )
-def run_modal_ingestion(directory: str, limit: int | None = None):
-    # Set the working directory to the mounted project root
+def run_modal_ingestion(directory: str, limit: int | None = None, run_id: str = "default"):
     os.chdir("/root/project")
     sys.path.insert(0, "/root/project")
-    
-    # Import and run the pipeline
+
     from src.json_ingest import run_json_ingest
-    
-    print("🚀 Starting serverless GPU pipeline on Modal...")
-    
-    # Define absolute paths inside the container mount
+
+    print(f"🚀 Starting serverless GPU pipeline on Modal (run_id={run_id})...")
+
     legacy_model_path = "/root/project/model_training/classifier.pkl"
     disruption_model_path = "/root/project/model_training/disruption_classifier.pkl"
     impact_model_path = "/root/project/model_training/impact_regressor_v2.pkl"
     raw_dir = f"/root/project/{directory}"
-    
-    # Execute the pipeline on the Modal serverless container
+
     n = run_json_ingest(
         raw_dir,
         legacy_model_path=legacy_model_path,
@@ -81,20 +85,26 @@ def run_modal_ingestion(directory: str, limit: int | None = None):
         skip_db=False,
         skip_temporal=False,
         regenerate_forecasts=True,
-        reprocess_all=False
+        reprocess_all=False,
+        run_id=run_id,
+        checkpoint_dir=CHECKPOINT_DIR,
     )
-    
-    print(f"✅ Ingestion complete. Processed {n} articles serverless.")
+
+    # Commit volume so files are visible immediately via `modal volume get`
+    checkpoint_volume.commit()
+    print(f"✅ Ingestion complete. Processed {n} articles. Checkpoints saved to volume '{CHECKPOINT_DIR}'.")
 
 @app.local_entrypoint()
-def main(directory: str = "data/raw/combined", limit: int = 500):
+def main(directory: str = "data/raw/combined", limit: int = 500, run_id: str = ""):
     if not db_conn:
         print("❌ Error: DB_CONNECTION_STRING is not set in your local .env file.")
         return
-        
-    # Treat 0 or negative values as no limit
+
+    from datetime import datetime
+    actual_run_id = run_id or datetime.now().strftime("%Y%m%d-%H%M%S")
     actual_limit = None if limit <= 0 else limit
     limit_str = "No Limit" if actual_limit is None else f"limit={actual_limit}"
-    
-    print(f"📡 Launching ingestion for '{directory}' ({limit_str}) on Modal...")
-    run_modal_ingestion.remote(directory=directory, limit=actual_limit)
+
+    print(f"📡 Launching ingestion for '{directory}' ({limit_str}) run_id={actual_run_id} on Modal...")
+    print(f"   To sync checkpoints: modal volume get supply-chain-checkpoints /checkpoint ./data/checkpoints")
+    run_modal_ingestion.remote(directory=directory, limit=actual_limit, run_id=actual_run_id)

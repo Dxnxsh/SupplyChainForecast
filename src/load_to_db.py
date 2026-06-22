@@ -296,9 +296,36 @@ def parse_timestamp_robust(timestamp_str):
     if timestamp_str.startswith('http://') or timestamp_str.startswith('https://'):
         return None
 
-    # Try ISO 8601 first (fromisoformat is generally faster and handles more variations)
-    # But for our specific case where it failed, we'll try strptime for explicit formats.
-    
+    # Silently skip short numbers (like '51', '89') or float strings representing them
+    try:
+        val = float(timestamp_str)
+        # Unix timestamp values are generally >= 1000000000 (representing year 2001+)
+        if val < 1000000000:
+            return None
+    except ValueError:
+        pass
+
+    # Any non-numeric string shorter than 8 characters is not a valid date
+    if len(timestamp_str) < 8:
+        return None
+
+    # Try ISO 8601 first via fromisoformat (generally faster and handles more variations)
+    try:
+        iso_str = timestamp_str
+        if iso_str.endswith('Z'):
+            iso_str = iso_str[:-1] + '+00:00'
+        
+        parsed_dt = datetime.fromisoformat(iso_str)
+        
+        # If the datetime is naive (no timezone info), assume UTC
+        if parsed_dt.tzinfo is None:
+            return pytz.utc.localize(parsed_dt)
+        
+        # If it has timezone info, convert it to UTC
+        return parsed_dt.astimezone(pytz.utc)
+    except ValueError:
+        pass
+
     for fmt in TIMESTAMP_FORMATS:
         try:
             # For formats without %z, it will be a naive datetime
@@ -336,6 +363,7 @@ def _recompute_supplier_risk_scores(connection, node_name=None):
     update_risk_stmt = text(f"""
         UPDATE suppliers AS s
         SET current_risk_score = COALESCE(
+            -- 1. Try to compute risk scores using recent events (last 30 days)
             (
                 SELECT ROUND(LEAST(100.0, COALESCE(0.62 * AVG(t.strength) + 0.38 * MAX(t.strength), 0.0))::numeric, 2)
                 FROM (
@@ -355,6 +383,26 @@ def _recompute_supplier_risk_scores(connection, node_name=None):
                       )
                 ) AS t
             ),
+            -- 2. Fall back to all-time events if no events occurred in the last 30 days (for backfills and historical analysis)
+            (
+                SELECT ROUND(LEAST(100.0, COALESCE(0.62 * AVG(t.strength) + 0.38 * MAX(t.strength), 0.0))::numeric, 2)
+                FROM (
+                    SELECT LEAST(
+                        100.0,
+                        COALESCE(
+                            e.predicted_impact_score::double precision / 3.0,
+                            e.risk_score::double precision
+                        )
+                    ) AS strength
+                    FROM events AS e
+                    WHERE e.matched_node @> jsonb_build_array(s.node_name)
+                      AND (
+                          (e.risk_score IS NOT NULL AND e.risk_score > 0)
+                          OR e.predicted_impact_score IS NOT NULL
+                      )
+                ) AS t
+            ),
+            -- 3. Default to 0.0 if no events exist at all for this supplier
             0.0
         )
         {where_clause};
@@ -363,10 +411,84 @@ def _recompute_supplier_risk_scores(connection, node_name=None):
     print("✅ Supplier risk scores updated from recent events.")
 
 
+_UPSERT_STMT = text("""
+    INSERT INTO events (
+        article_url, article_source, article_title, article_timestamp, event_text_segment,
+        potential_event_types, extracted_locations, matched_node, risk_score, risk_relevance_score,
+        risk_severity_score, latitude, longitude, temporal_info, ml_risk_label, ml_risk_confidence,
+        ml_risk_probabilities, predicted_disruption_probability, predicted_impact_score,
+        sentiment_label, sentiment_score
+    )
+    VALUES (
+        :article_url, :article_source, :article_title, :article_timestamp, :event_text_segment,
+        :potential_event_types, :extracted_locations, :matched_node, :risk_score, :risk_relevance_score,
+        :risk_severity_score, :latitude, :longitude, :temporal_info, :ml_risk_label, :ml_risk_confidence,
+        :ml_risk_probabilities, :predicted_disruption_probability, :predicted_impact_score,
+        :sentiment_label, :sentiment_score
+    )
+    ON CONFLICT (article_url) DO UPDATE SET
+        article_source = COALESCE(EXCLUDED.article_source, events.article_source),
+        article_title = COALESCE(EXCLUDED.article_title, events.article_title),
+        article_timestamp = COALESCE(EXCLUDED.article_timestamp, events.article_timestamp),
+        event_text_segment = COALESCE(EXCLUDED.event_text_segment, events.event_text_segment),
+        potential_event_types = COALESCE(EXCLUDED.potential_event_types, events.potential_event_types),
+        extracted_locations = COALESCE(EXCLUDED.extracted_locations, events.extracted_locations),
+        matched_node = COALESCE(EXCLUDED.matched_node, events.matched_node),
+        risk_score = COALESCE(EXCLUDED.risk_score, events.risk_score),
+        risk_relevance_score = COALESCE(EXCLUDED.risk_relevance_score, events.risk_relevance_score),
+        risk_severity_score = COALESCE(EXCLUDED.risk_severity_score, events.risk_severity_score),
+        latitude = COALESCE(EXCLUDED.latitude, events.latitude),
+        longitude = COALESCE(EXCLUDED.longitude, events.longitude),
+        temporal_info = COALESCE(EXCLUDED.temporal_info, events.temporal_info),
+        ml_risk_label = COALESCE(EXCLUDED.ml_risk_label, events.ml_risk_label),
+        ml_risk_confidence = COALESCE(EXCLUDED.ml_risk_confidence, events.ml_risk_confidence),
+        ml_risk_probabilities = COALESCE(EXCLUDED.ml_risk_probabilities, events.ml_risk_probabilities),
+        predicted_disruption_probability = COALESCE(EXCLUDED.predicted_disruption_probability, events.predicted_disruption_probability),
+        predicted_impact_score = COALESCE(EXCLUDED.predicted_impact_score, events.predicted_impact_score),
+        sentiment_label = COALESCE(EXCLUDED.sentiment_label, events.sentiment_label),
+        sentiment_score = COALESCE(EXCLUDED.sentiment_score, events.sentiment_score);
+""")
+
+_UPSERT_CHUNK_SIZE = int(os.environ.get("UPSERT_CHUNK_SIZE", "1000"))
+
+
+def _clean_str(val):
+    if val is None:
+        return None
+    return str(val).replace("\u0000", "").replace("\x00", "")
+
+
+def _event_to_row(event: dict) -> dict:
+    mn = event.get("matched_node")
+    return {
+        "article_url": _clean_str(event.get("article_url")),
+        "article_source": _clean_str(event.get("article_source")),
+        "article_title": _clean_str(event.get("article_title")),
+        "article_timestamp": parse_timestamp_robust(event.get("article_timestamp")),
+        "event_text_segment": _clean_str(event.get("event_text_segment")),
+        "potential_event_types": _clean_str(json.dumps(event.get("potential_event_types") or [])),
+        "extracted_locations": _clean_str(json.dumps(event.get("extracted_locations") or [])),
+        "matched_node": _clean_str(json.dumps(mn) if isinstance(mn, list) else (json.dumps([mn]) if mn else "[]")),
+        "risk_score": event.get("risk_score"),
+        "risk_relevance_score": event.get("risk_relevance_score"),
+        "risk_severity_score": event.get("risk_severity_score"),
+        "latitude": event.get("latitude"),
+        "longitude": event.get("longitude"),
+        "temporal_info": _clean_str(json.dumps(event.get("temporal_info")) if event.get("temporal_info") is not None else None),
+        "ml_risk_label": _clean_str(event.get("ml_risk_label")),
+        "ml_risk_confidence": event.get("ml_risk_confidence"),
+        "ml_risk_probabilities": _clean_str(json.dumps(event.get("ml_risk_probabilities")) if event.get("ml_risk_probabilities") is not None else None),
+        "predicted_disruption_probability": event.get("predicted_disruption_probability"),
+        "predicted_impact_score": event.get("predicted_impact_score"),
+        "sentiment_label": _clean_str(event.get("sentiment_label")),
+        "sentiment_score": event.get("sentiment_score"),
+    }
+
+
 def upsert_events(engine, events_data, recompute_supplier_scores=True):
     """
-    Upsert event rows only. Ensures ML columns exist on PostgreSQL.
-    Used by full pipeline load and by RSS ingestion.
+    Upsert event rows in chunks. Sends _UPSERT_CHUNK_SIZE rows per round-trip
+    instead of one per event, reducing DB write time from O(n) network calls to O(n/1000).
     """
     if not events_data:
         return 0
@@ -374,84 +496,45 @@ def upsert_events(engine, events_data, recompute_supplier_scores=True):
     ensure_events_risk_columns(engine)
     ensure_events_impact_columns(engine)
     ensure_events_sentiment_columns(engine)
-    insert_count = 0
-    with engine.connect() as connection:
-        print(f"Upserting {len(events_data)} event(s)...")
-        for event in events_data:
-            parsed_timestamp = parse_timestamp_robust(event.get('article_timestamp'))
-            potential_event_types_json = json.dumps(event.get('potential_event_types')) if event.get('potential_event_types') is not None else '[]'
-            extracted_locations_json = json.dumps(event.get('extracted_locations')) if event.get('extracted_locations') is not None else '[]'
-            temporal_info_json = json.dumps(event.get('temporal_info')) if event.get('temporal_info') is not None else None
-            ml_probs = event.get('ml_risk_probabilities')
-            ml_risk_probabilities_json = json.dumps(ml_probs) if ml_probs is not None else None
 
-            stmt = text("""
-                INSERT INTO events (
-                    article_url, article_source, article_title, article_timestamp, event_text_segment,
-                    potential_event_types, extracted_locations, matched_node, risk_score, risk_relevance_score, risk_severity_score, latitude, longitude,
-                    temporal_info, ml_risk_label, ml_risk_confidence, ml_risk_probabilities, predicted_disruption_probability, predicted_impact_score,
-                    sentiment_label, sentiment_score
-                )
-                VALUES (
-                    :article_url, :article_source, :article_title, :article_timestamp, :event_text_segment,
-                    :potential_event_types, :extracted_locations, :matched_node, :risk_score, :risk_relevance_score, :risk_severity_score, :latitude, :longitude,
-                    :temporal_info, :ml_risk_label, :ml_risk_confidence, :ml_risk_probabilities, :predicted_disruption_probability, :predicted_impact_score,
-                    :sentiment_label, :sentiment_score
-                )
-                ON CONFLICT (article_url) DO UPDATE SET
-                    article_source = COALESCE(EXCLUDED.article_source, events.article_source),
-                    article_title = COALESCE(EXCLUDED.article_title, events.article_title),
-                    article_timestamp = COALESCE(EXCLUDED.article_timestamp, events.article_timestamp),
-                    event_text_segment = COALESCE(EXCLUDED.event_text_segment, events.event_text_segment),
-                    potential_event_types = COALESCE(EXCLUDED.potential_event_types, events.potential_event_types),
-                    extracted_locations = COALESCE(EXCLUDED.extracted_locations, events.extracted_locations),
-                    matched_node = COALESCE(EXCLUDED.matched_node, events.matched_node),
-                    risk_score = COALESCE(EXCLUDED.risk_score, events.risk_score),
-                    risk_relevance_score = COALESCE(EXCLUDED.risk_relevance_score, events.risk_relevance_score),
-                    risk_severity_score = COALESCE(EXCLUDED.risk_severity_score, events.risk_severity_score),
-                    latitude = COALESCE(EXCLUDED.latitude, events.latitude),
-                    longitude = COALESCE(EXCLUDED.longitude, events.longitude),
-                    temporal_info = COALESCE(EXCLUDED.temporal_info, events.temporal_info),
-                    ml_risk_label = COALESCE(EXCLUDED.ml_risk_label, events.ml_risk_label),
-                    ml_risk_confidence = COALESCE(EXCLUDED.ml_risk_confidence, events.ml_risk_confidence),
-                    ml_risk_probabilities = COALESCE(EXCLUDED.ml_risk_probabilities, events.ml_risk_probabilities),
-                    predicted_disruption_probability = COALESCE(EXCLUDED.predicted_disruption_probability, events.predicted_disruption_probability),
-                    predicted_impact_score = COALESCE(EXCLUDED.predicted_impact_score, events.predicted_impact_score),
-                    sentiment_label = COALESCE(EXCLUDED.sentiment_label, events.sentiment_label),
-                    sentiment_score = COALESCE(EXCLUDED.sentiment_score, events.sentiment_score);
-            """)
+    rows = [_event_to_row(ev) for ev in events_data]
+    
+    # De-duplicate rows by article_url to avoid PostgreSQL "ON CONFLICT DO UPDATE command cannot affect row a second time" error in batch inserts.
+    # Keep the last occurrence in the list.
+    deduped_rows_dict = {}
+    for row in rows:
+        url = row.get("article_url")
+        if url:
+            deduped_rows_dict[url] = row
+    deduped_rows = list(deduped_rows_dict.values())
+    
+    total = len(deduped_rows)
+    original_total = len(rows)
+    if original_total != total:
+        print(f"ℹ️ De-duplicated events by article_url: {original_total} -> {total} ({original_total - total} duplicates removed)")
+        
+    insert_count = 0
+
+    from tqdm import tqdm
+    with engine.connect() as connection:
+        for start in tqdm(range(0, total, _UPSERT_CHUNK_SIZE), desc="Upserting to DB"):
+            chunk = deduped_rows[start:start + _UPSERT_CHUNK_SIZE]
             try:
-                result = connection.execute(stmt, {
-                    "article_url": event.get('article_url'),
-                    "article_source": event.get('article_source'),
-                    "article_title": event.get('article_title'),
-                    "article_timestamp": parsed_timestamp,
-                    "event_text_segment": event.get('event_text_segment'),
-                    "potential_event_types": potential_event_types_json,
-                    "extracted_locations": extracted_locations_json,
-                    "matched_node": json.dumps(event.get('matched_node')) if isinstance(event.get('matched_node'), list) else json.dumps([event.get('matched_node')]) if event.get('matched_node') else '[]',
-                    "risk_score": event.get('risk_score'),
-                    "risk_relevance_score": event.get('risk_relevance_score'),
-                    "risk_severity_score": event.get('risk_severity_score'),
-                    "latitude": event.get('latitude'),
-                    "longitude": event.get('longitude'),
-                    "temporal_info": temporal_info_json,
-                    "ml_risk_label": event.get('ml_risk_label'),
-                    "ml_risk_confidence": event.get('ml_risk_confidence'),
-                    "ml_risk_probabilities": ml_risk_probabilities_json,
-                    "predicted_disruption_probability": event.get('predicted_disruption_probability'),
-                    "predicted_impact_score": event.get('predicted_impact_score'),
-                    "sentiment_label": event.get('sentiment_label'),
-                    "sentiment_score": event.get('sentiment_score'),
-                })
-                if result.rowcount > 0:
-                    insert_count += 1
+                result = connection.execute(_UPSERT_STMT, chunk)
+                insert_count += result.rowcount if result.rowcount and result.rowcount > 0 else len(chunk)
             except SQLAlchemyError as e:
-                print(f"⚠️ Warning: Could not insert event {event.get('article_url')}. Error: {e}")
+                print(f"⚠️ Chunk upsert failed (rows {start}–{start+len(chunk)}): {e}")
+                for row in chunk:
+                    try:
+                        connection.execute(_UPSERT_STMT, row)
+                        insert_count += 1
+                    except SQLAlchemyError as row_e:
+                        print(f"⚠️ Skipping row {row.get('article_url')}: {row_e}")
         if recompute_supplier_scores:
             _recompute_supplier_risk_scores(connection)
         connection.commit()
-    print(f"✅ Events upsert complete (rows affected approx): {insert_count}")
+
+    print(f"✅ Events upsert complete: {total} events in {(total + _UPSERT_CHUNK_SIZE - 1) // _UPSERT_CHUNK_SIZE} chunks")
     return insert_count
 
 

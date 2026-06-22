@@ -424,6 +424,8 @@ venv311/bin/python -m src.json_ingest --dry-run --limit 20
 | `USE_FINBERT_RISK` | `1` | `0` → use VADER instead of FinBERT |
 | `FINBERT_MODEL` | `ProsusAI/finbert` | HuggingFace model id |
 | `FINBERT_DEVICE` | auto | `cpu`, `cuda`, or `mps` |
+| `SPACY_DEVICE` | auto | `gpu` (default preferred/activated) or `cpu` |
+| `SPACY_BATCH_SIZE` | `256` | Batch size for `nlp.pipe()` |
 | `RSS_FEEDS_PATH` | `config/rss_feeds.json` | JSON array of `{url, source}` entries |
 | `ML_CLASSIFIER_PATH` | `model_training/classifier.pkl` | Tri-class headline risk model |
 | `DISRUPTION_CLASSIFIER_PATH` | `model_training/disruption_classifier.pkl` | Binary disruption XGBoost |

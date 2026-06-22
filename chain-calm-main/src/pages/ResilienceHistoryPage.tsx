@@ -30,10 +30,10 @@ const HISTORY_DAYS = 60;
 
 function isoYesterdayUtc(): string {
   const d = new Date();
-  d.setDate(d.getDate() - 1);
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
+  d.setUTCDate(d.getUTCDate() - 1);
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
@@ -132,8 +132,8 @@ export default function ResilienceHistoryPage() {
     // Bridge: if the last history point has no trace entry, anchor the purple
     // line to the realized value so both lines meet at Today without a gap.
     const lastHist = histRaw.length > 0 ? histRaw[histRaw.length - 1] : null;
-    if (lastHist && lastHist.yhat === null) {
-      const anchorValue = lastHist.y_actual ?? 0;
+    if (lastHist && lastHist.yhat === null && lastHist.y_actual !== null) {
+      const anchorValue = lastHist.y_actual;
       lastHist.yhat = anchorValue;
       lastHist.yhat_lower = anchorValue;
       lastHist.yhat_upper = anchorValue;
@@ -164,6 +164,7 @@ export default function ResilienceHistoryPage() {
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ active: false, startX: 0, scrollLeft: 0 });
+  const hasScrolledRef = useRef(false);
 
   const onMouseDown = useCallback((e: MouseEvent<HTMLDivElement>) => {
     const el = scrollContainerRef.current;
@@ -198,14 +199,19 @@ export default function ResilienceHistoryPage() {
   }, [chartData, todayStr]);
 
   useEffect(() => {
+    if (hasScrolledRef.current) return;
+    if (chartData.length === 0) return;
     scrollToToday();
-  }, [scrollToToday]);
+    hasScrolledRef.current = true;
+  }, [scrollToToday, chartData.length]);
 
   const isLoading =
     suppliersQuery.isLoading || historyQuery.isLoading || traceQuery.isLoading || forecastQuery.isLoading;
 
   const hasError =
     suppliersQuery.isError ||
+    historyQuery.isError ||
+    traceQuery.isError ||
     forecastQuery.isError ||
     (showOverlay && snapshotQuery.isError);
 
@@ -325,7 +331,7 @@ export default function ResilienceHistoryPage() {
               key={label}
               initial={shouldReduceMotion ? false : { opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={shouldReduceMotion ? {} : { delay, duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
+              transition={shouldReduceMotion ? { duration: 0 } : { delay, duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
               className="bg-card px-4 py-3"
             >
               <p className="text-xs font-mono text-muted-foreground tracking-widest">{label}</p>
@@ -390,8 +396,10 @@ export default function ResilienceHistoryPage() {
                     stroke="hsl(240, 5%, 28%)"
                     tick={{ fill: 'hsl(240, 5%, 40%)', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}
                     tickFormatter={(v) => {
-                      const d = new Date(String(v));
-                      return isNaN(d.getTime()) ? String(v) : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+                      const s = String(v);
+                      // Parse as UTC noon to avoid UTC-offset day shift
+                      const d = new Date(s + 'T12:00:00Z');
+                      return isNaN(d.getTime()) ? s : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
                     }}
                     tickLine={false}
                     axisLine={false}
@@ -401,7 +409,7 @@ export default function ResilienceHistoryPage() {
                   <YAxis
                     stroke="hsl(240, 5%, 28%)"
                     tick={{ fill: 'hsl(240, 5%, 40%)', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' }}
-                    domain={[0, 'auto']}
+                    domain={[0, (dataMax: number) => Math.max(BAND_MED_MAX * 1.5, dataMax === 0 ? BAND_MED_MAX * 1.5 : dataMax)]}
                     tickLine={false}
                     axisLine={false}
                     dx={-8}
@@ -427,9 +435,10 @@ export default function ResilienceHistoryPage() {
                   <Area
                     type="monotone"
                     dataKey="yhat_upper"
+                    stackId="ci"
                     stroke="none"
                     fill={FORECAST_BLUE}
-                    fillOpacity={0.08}
+                    fillOpacity={0.12}
                     legendType="none"
                     connectNulls={false}
                     activeDot={false}
@@ -437,9 +446,10 @@ export default function ResilienceHistoryPage() {
                   <Area
                     type="monotone"
                     dataKey="yhat_lower"
+                    stackId="ci"
                     stroke="none"
-                    fill={FORECAST_BLUE}
-                    fillOpacity={0}
+                    fill="hsl(var(--card))"
+                    fillOpacity={1}
                     legendType="none"
                     connectNulls={false}
                     activeDot={false}

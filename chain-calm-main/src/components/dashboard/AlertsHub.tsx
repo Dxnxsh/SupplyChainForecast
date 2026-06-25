@@ -1,11 +1,10 @@
-import { motion, AnimatePresence } from 'framer-motion';
-import { AlertTriangle, Calendar, ExternalLink, ShieldAlert, X } from 'lucide-react';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
+import { AlertTriangle, Calendar, ExternalLink, Shield, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { DisruptionEvent } from '@/types/supplier';
 import { RiskBadge } from './RiskBadge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Separator } from '@/components/ui/separator';
 
 interface AlertsHubProps {
   isOpen: boolean;
@@ -15,111 +14,132 @@ interface AlertsHubProps {
 }
 
 export function AlertsHub({ isOpen, onClose, alerts, onSelectAlert }: AlertsHubProps) {
+  const shouldReduceMotion = useReducedMotion();
   const highRiskAlerts = alerts.filter(a => a.riskScore && a.riskScore > 60);
+
+  const panelVariants = {
+    hidden: shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.98 },
+    show: { opacity: 1, y: 0, scale: 1 },
+    exit: shouldReduceMotion ? { opacity: 0 } : { opacity: 0, y: -6, scale: 0.98 },
+  };
+
+  const listVariants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: shouldReduceMotion ? {} : { staggerChildren: 0.04, delayChildren: 0.04 },
+    },
+  };
+
+  const itemVariants = {
+    hidden: shouldReduceMotion ? { opacity: 0 } : { opacity: 0, x: 8 },
+    show: { opacity: 1, x: 0 },
+  };
 
   const content = (
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Global Backdrop Overlay */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.12 }}
             onClick={onClose}
-            className="fixed inset-0 bg-black/5 backdrop-blur-[1px] z-[9998] cursor-default"
+            className="fixed inset-0 z-[9998] cursor-default"
           />
-          
-          {/* Hub Panel */}
+
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: -20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-            className="fixed top-20 right-4 w-96 h-[calc(100vh-120px)] max-h-[600px] bg-card border border-border shadow-2xl rounded-xl z-[9999] overflow-hidden flex flex-col"
-            onClick={(e) => e.stopPropagation()}
+            variants={panelVariants}
+            initial="hidden"
+            animate="show"
+            exit="exit"
+            transition={{ duration: 0.18, ease: [0.25, 1, 0.5, 1] }}
+            className="fixed top-14 right-3 w-88 max-w-[calc(100vw-1.5rem)] h-[calc(100vh-80px)] max-h-[560px] bg-card border border-border rounded z-[9999] overflow-hidden flex flex-col"
+            style={{ width: '352px' }}
+            onClick={e => e.stopPropagation()}
           >
-            <div className="p-4 border-b border-border flex items-center justify-between bg-secondary/20">
-              <div className="flex items-center gap-2">
-                <ShieldAlert className="w-5 h-5 text-primary" />
-                <h3 className="font-semibold text-foreground">Active Risk Alerts</h3>
+            {/* Header */}
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between bg-secondary/20">
+              <div className="flex items-center gap-2.5">
+                <Shield className="w-3.5 h-3.5 text-primary" />
+                <span className="text-xs font-semibold text-foreground">Active Alerts</span>
+                {highRiskAlerts.length > 0 && (
+                  <span className="text-xs font-mono font-bold bg-risk-high/15 text-risk-high border border-risk-high/30 px-1.5 py-0.5 rounded">
+                    {highRiskAlerts.length} HIGH
+                  </span>
+                )}
               </div>
-              <RiskBadge level="high" size="sm" labelPrefix={`${highRiskAlerts.length}`} />
+              <button
+                onClick={onClose}
+                className="text-muted-foreground hover:text-foreground transition-colors"
+                aria-label="Close alerts"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
 
-            <ScrollArea className="flex-grow overflow-y-auto">
-              <motion.div 
+            <ScrollArea className="flex-1">
+              <motion.div
+                variants={listVariants}
                 initial="hidden"
                 animate="show"
-                variants={{
-                  hidden: { opacity: 0 },
-                  show: {
-                    opacity: 1,
-                    transition: { staggerChildren: 0.05 }
-                  }
-                }}
-                className="p-2 space-y-2"
+                className="p-2 space-y-1.5"
               >
                 {alerts.length === 0 ? (
-                  <div className="p-8 text-center space-y-2">
-                    <AlertTriangle className="w-8 h-8 text-muted-foreground mx-auto opacity-20" />
-                    <p className="text-sm text-muted-foreground">No critical alerts detected</p>
+                  <div className="py-10 text-center space-y-2">
+                    <AlertTriangle className="w-6 h-6 text-muted-foreground/30 mx-auto" />
+                    <p className="text-xs font-mono text-muted-foreground">NO ACTIVE ALERTS</p>
                   </div>
                 ) : highRiskAlerts.length > 0 ? (
-                  highRiskAlerts.map((alert) => (
+                  highRiskAlerts.map(alert => (
                     <motion.div
                       key={alert.id}
-                      variants={{
-                        hidden: { opacity: 0, x: 20 },
-                        show: { opacity: 1, x: 0 }
-                      }}
-                      whileHover={{ scale: 1.02, backgroundColor: 'rgba(var(--secondary), 0.4)' }}
-                      className="p-3 rounded-lg border border-border bg-secondary/10 backdrop-blur-sm hover:bg-secondary/30 transition-all cursor-pointer group relative overflow-hidden"
+                      variants={itemVariants}
+                      className="p-3 rounded border border-risk-high/20 bg-risk-high/5 hover:bg-risk-high/10 transition-colors cursor-pointer group"
                       onClick={() => onSelectAlert(alert)}
                     >
-                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-risk-high shadow-[0_0_8px_rgba(239,68,68,0.4)]" />
-                      <div className="flex items-start justify-between gap-2 pl-2">
-                        <div className="flex-1">
-                          <h4 className="text-sm font-bold text-foreground group-hover:text-primary transition-colors line-clamp-2 leading-tight">
-                            {alert.title}
-                          </h4>
-                          <div className="flex items-center gap-2 mt-1.5 text-[10px] text-muted-foreground">
-                            <span className="font-bold text-primary tracking-wider uppercase">{alert.matchedNode?.replace(/_/g, ' ')}</span>
-                            <span className="opacity-30">|</span>
-                            <Calendar className="w-3 h-3" />
-                            <span>{alert.predictedDate || alert.date}</span>
-                          </div>
-                        </div>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h4 className="text-xs font-medium text-foreground group-hover:text-primary transition-colors line-clamp-2 leading-snug">
+                          {alert.title}
+                        </h4>
                         <RiskBadge level={alert.severity} size="sm" showLabel={false} />
                       </div>
-                      
-                      <div className="flex items-center justify-between mt-3 pl-2">
-                        <div className="flex gap-2">
-                          {alert.riskScore && (
-                            <span className="text-[10px] bg-risk-high/20 text-risk-high px-2 py-0.5 rounded-full font-bold border border-risk-high/30">
-                              RISK {Math.round(alert.riskScore)}%
-                            </span>
+
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs font-mono text-muted-foreground">
+                          <span className="text-primary/80">{alert.matchedNode?.replace(/_/g, ' ')}</span>
+                          {(alert.predictedDate || alert.date) && (
+                            <>
+                              <span className="opacity-30">·</span>
+                              <Calendar className="w-2.5 h-2.5" />
+                              <span>{alert.predictedDate || alert.date}</span>
+                            </>
                           )}
                         </div>
-                        <Button variant="ghost" size="sm" className="h-7 px-2 text-[10px] gap-1 hover:bg-primary/10 hover:text-primary transition-colors font-bold uppercase tracking-tighter">
-                          Engage Map
-                          <ExternalLink className="w-3 h-3" />
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          {alert.riskScore && (
+                            <span className="text-xs font-mono font-bold text-risk-high">
+                              {Math.round(alert.riskScore)}%
+                            </span>
+                          )}
+                          <ExternalLink className="w-3 h-3 text-muted-foreground group-hover:text-primary transition-colors" />
+                        </div>
                       </div>
                     </motion.div>
                   ))
                 ) : (
-                  <div className="p-8 text-center space-y-2">
-                    <ShieldAlert className="w-8 h-8 text-muted-foreground mx-auto opacity-20" />
-                    <p className="text-sm text-muted-foreground">System stable. No new alerts.</p>
+                  <div className="py-10 text-center space-y-2">
+                    <Shield className="w-6 h-6 text-muted-foreground/30 mx-auto" />
+                    <p className="text-xs font-mono text-muted-foreground">SYSTEM STABLE</p>
                   </div>
                 )}
               </motion.div>
             </ScrollArea>
 
-            <div className="p-3 border-t border-border bg-secondary/5 flex justify-center">
-              <Button variant="ghost" size="sm" onClick={onClose} className="text-xs">
-                Dismiss All
+            <div className="px-3 py-2 border-t border-border">
+              <Button variant="ghost" size="sm" onClick={onClose} className="w-full text-xs h-7 font-mono text-muted-foreground">
+                DISMISS
               </Button>
             </div>
           </motion.div>

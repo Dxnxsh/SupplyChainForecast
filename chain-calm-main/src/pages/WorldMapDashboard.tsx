@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
+
 import { Globe, Building2, AlertTriangle, Shield, Filter } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { useSearchParams, useLocation, useNavigate } from 'react-router-dom';
@@ -25,7 +26,8 @@ export default function WorldMapDashboard() {
   const [filterProduct, setFilterProduct] = useState<string>('all');
   /** YYYY-MM-DD UTC calendar day, or '' for live data */
   const [rewindDate, setRewindDate] = useState<string>('');
-  
+  const shouldReduceMotion = useReducedMotion();
+
   const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -149,120 +151,116 @@ export default function WorldMapDashboard() {
   return (
     <div className="flex-1 flex flex-col h-screen overflow-hidden">
       <Header
-        title="World Map Dashboard"
-        subtitle={
-          rewindDate
-            ? `Rewind: data as of ${rewindDate} (UTC calendar day)`
-            : 'Global supply chain monitoring (live)'
-        }
+        title="World Map"
+        subtitle={rewindDate ? `AS-OF ${rewindDate}` : 'LIVE · Global monitoring'}
       />
 
       <div className="flex-1 flex overflow-hidden">
-        <div className="flex-1 flex flex-col p-6 overflow-auto">
-          {/* Stats Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <StatsCard
-              title="Total Suppliers"
-              value={stats.totalSuppliers}
-              subtitle="Across 8 countries"
-              icon={Building2}
-            />
-            <StatsCard
-              title="High Risk"
-              value={stats.highRisk}
-              subtitle="Require attention"
-              icon={AlertTriangle}
-              variant="risk-high"
-            />
-            <StatsCard
-              title="Avg. Risk"
-              value={`${stats.avgRisk}%`}
-              icon={Shield}
-              subtitle={`${stats.countries} countries tracked`}
-            />
-            <StatsCard
-              title="Active Alerts"
-              value={stats.activeAlerts}
-              subtitle="Forecasted disruptions"
-              icon={Globe}
-              variant="risk-medium"
-            />
+        <div className="flex-1 flex flex-col overflow-hidden">
+
+          {/* Stats strip — horizontal, compact, above the map */}
+          <div className="flex gap-px border-b border-border bg-border shrink-0">
+            {[
+              { label: 'SUPPLIERS', value: stats.totalSuppliers, variant: 'default' as const, icon: Building2 },
+              { label: 'HIGH RISK', value: stats.highRisk, variant: 'risk-high' as const, icon: AlertTriangle },
+              { label: 'AVG RISK', value: `${stats.avgRisk}%`, variant: 'default' as const, icon: Shield },
+              { label: 'ALERTS', value: stats.activeAlerts, variant: 'risk-medium' as const, icon: Globe },
+            ].map(({ label, value, variant, icon: Icon }) => (
+              <div
+                key={label}
+                className={`flex-1 flex items-center justify-between px-4 py-2.5 bg-card ${
+                  variant === 'risk-high' ? 'border-t-2 border-risk-high/60' :
+                  variant === 'risk-medium' ? 'border-t-2 border-risk-medium/40' :
+                  'border-t-2 border-transparent'
+                }`}
+              >
+                <div>
+                  <p className="text-xs font-mono text-muted-foreground tracking-widest">{label}</p>
+                  <p className={`text-2xl font-bold font-mono tabular-nums leading-none mt-0.5 ${
+                    variant === 'risk-high' ? 'text-risk-high' :
+                    variant === 'risk-medium' ? 'text-risk-medium' :
+                    'text-foreground'
+                  }`}>{value}</p>
+                </div>
+                <Icon className="w-4 h-4 text-muted-foreground/40" />
+              </div>
+            ))}
           </div>
 
           {hasError && (
-            <div className="mb-4 rounded-lg border border-risk-high/40 bg-risk-high/10 px-4 py-3 text-sm text-risk-high">
-              Could not load some dashboard data from the backend. Check that the API is running.
+            <div className="mx-4 mt-3 rounded border border-risk-high/30 bg-risk-high/8 px-3 py-2 text-xs font-mono text-risk-high">
+              BACKEND UNREACHABLE — check that the API server is running on port 8000
             </div>
           )}
 
-          {/* Filter Bar */}
-          <div className="flex flex-wrap items-center gap-4 mb-4">
+          {/* Filter bar */}
+          <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 border-b border-border bg-card/40 shrink-0">
             <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground whitespace-nowrap">As of (UTC):</span>
+              <label className="text-xs font-mono text-muted-foreground tracking-widest uppercase whitespace-nowrap">
+                As of
+              </label>
               <input
                 type="date"
-                className="h-9 rounded-md border border-border bg-secondary/50 px-3 text-sm text-foreground"
+                aria-label="As of date (UTC)"
+                className="h-7 rounded border border-border bg-secondary/50 px-2 text-xs font-mono text-foreground"
                 value={rewindDate}
                 max={(() => {
                   const d = new Date();
-                  const year = d.getFullYear();
-                  const month = String(d.getMonth() + 1).padStart(2, '0');
-                  const day = String(d.getDate()).padStart(2, '0');
-                  return `${year}-${month}-${day}`;
+                  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
                 })()}
-                onChange={(e) => setRewindDate(e.target.value)}
+                onChange={e => setRewindDate(e.target.value)}
               />
-              <Button
-                variant="ghost"
-                size="sm"
-                type="button"
-                onClick={() => setRewindDate('')}
-              >
-                Live
-              </Button>
+              {rewindDate && (
+                <button
+                  onClick={() => setRewindDate('')}
+                  className="text-xs font-mono text-primary hover:underline"
+                >
+                  LIVE
+                </button>
+              )}
             </div>
+
+            <div className="w-px h-4 bg-border" />
+
             <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-muted-foreground" />
-              <span className="text-sm text-muted-foreground">Filter by product:</span>
+              <Filter className="w-3 h-3 text-muted-foreground" />
+              <Select value={filterProduct} onValueChange={setFilterProduct}>
+                <SelectTrigger className="h-7 w-40 bg-secondary/50 text-xs font-mono border-border">
+                  <SelectValue placeholder="All Products" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-xs font-mono">All Products</SelectItem>
+                  {products.map(p => (
+                    <SelectItem key={p} value={p} className="text-xs font-mono">{p}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {filterProduct !== 'all' && (
+                <button
+                  onClick={() => setFilterProduct('all')}
+                  className="text-xs font-mono text-muted-foreground hover:text-foreground"
+                >
+                  CLEAR
+                </button>
+              )}
             </div>
-            <Select value={filterProduct} onValueChange={setFilterProduct}>
-              <SelectTrigger className="w-48 bg-secondary/50">
-                <SelectValue placeholder="Product" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Products</SelectItem>
-                {products.map((product) => (
-                  <SelectItem key={product} value={product}>
-                    {product}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" size="sm" type="button" onClick={() => setFilterProduct('all')}>
-              Clear product
-            </Button>
 
             {suppliersQuery.isLoading && (
-              <span className="text-sm text-muted-foreground">Loading suppliers...</span>
+              <span className="text-xs font-mono text-muted-foreground ml-auto animate-pulse">LOADING…</span>
             )}
           </div>
 
-          {/* World Map */}
+          {/* Map — fills all remaining space */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.98 }}
-            animate={{ opacity: 1, scale: 1 }}
-            className="flex-1 min-h-[500px] glass-card rounded-xl overflow-hidden"
+            initial={shouldReduceMotion ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.3, ease: [0.25, 1, 0.5, 1] }}
+            className="flex-1 bg-card overflow-hidden"
           >
             <WorldMap
               suppliers={filteredSuppliers}
-              onSupplierClick={(s) => {
-                if (s) {
-                  setSearchParams(prev => {
-                    const next = new URLSearchParams(prev);
-                    next.set('s', s.id);
-                    return next;
-                  });
-                }
+              onSupplierClick={s => {
+                if (s) setSearchParams(prev => { const n = new URLSearchParams(prev); n.set('s', s.id); return n; });
               }}
               selectedSupplier={selectedSupplier}
               coloredEdges={coloredEdges}
@@ -279,11 +277,7 @@ export default function WorldMapDashboard() {
           isLoading={supplierEventsQuery.isLoading}
           onClose={() => {
             setSelectedSupplier(null);
-            setSearchParams(prev => {
-              const next = new URLSearchParams(prev);
-              next.delete('s');
-              return next;
-            });
+            setSearchParams(prev => { const n = new URLSearchParams(prev); n.delete('s'); return n; });
           }}
         />
       </div>

@@ -10,56 +10,59 @@ interface RiskBadgeProps {
 
 const riskConfig = {
   low: {
-    label: 'Low Risk',
-    bgClass: 'bg-risk-low/20',
+    label: 'LOW',
+    bgClass: 'bg-risk-low/12',
     textClass: 'text-risk-low',
+    borderClass: 'border-risk-low/30',
     dotClass: 'bg-risk-low',
   },
   medium: {
-    label: 'Medium Risk',
-    bgClass: 'bg-risk-medium/20',
+    label: 'MEDIUM',
+    bgClass: 'bg-risk-medium/12',
     textClass: 'text-risk-medium',
+    borderClass: 'border-risk-medium/30',
     dotClass: 'bg-risk-medium',
   },
   high: {
-    label: 'High Risk',
-    bgClass: 'bg-risk-high/20',
+    label: 'HIGH',
+    bgClass: 'bg-risk-high/12',
     textClass: 'text-risk-high',
+    borderClass: 'border-risk-high/30',
     dotClass: 'bg-risk-high',
   },
   critical: {
-    label: 'Critical',
-    bgClass: 'bg-risk-critical/20',
+    label: 'CRITICAL',
+    bgClass: 'bg-risk-critical/12',
     textClass: 'text-risk-critical',
+    borderClass: 'border-risk-critical/30',
     dotClass: 'bg-risk-critical',
   },
 };
 
 const sizeConfig = {
-  sm: 'text-xs px-2 py-0.5',
-  md: 'text-sm px-2.5 py-1',
-  lg: 'text-base px-3 py-1.5',
+  sm: 'text-xs px-1.5 py-0.5 tracking-widest',
+  md: 'text-xs px-2 py-0.5 tracking-widest',
+  lg: 'text-xs px-2.5 py-1 tracking-wider',
 };
 
 export function RiskBadge({ level, showLabel = true, size = 'md', labelPrefix }: RiskBadgeProps) {
   const config = riskConfig[level];
+  const label = labelPrefix ? `${labelPrefix}: ${config.label}` : config.label;
 
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 rounded-full font-medium',
+        'inline-flex items-center gap-1.5 rounded border font-mono font-medium',
         config.bgClass,
         config.textClass,
+        config.borderClass,
         sizeConfig[size]
       )}
+      aria-label={!showLabel ? label : undefined}
+      role={!showLabel ? 'img' : undefined}
     >
-      <span className={cn('w-2 h-2 rounded-full', config.dotClass)} />
-      {showLabel && (
-        <span>
-          {labelPrefix ? `${labelPrefix}: ` : ''}
-          {config.label}
-        </span>
-      )}
+      <span className={cn('w-1.5 h-1.5 rounded-full shrink-0', config.dotClass)} aria-hidden="true" />
+      {showLabel && <span>{label}</span>}
     </span>
   );
 }

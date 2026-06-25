@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(venv311/bin/python *)",
-      "Skill(browse)"
+      "Skill(browse)",
+      "Bash(npx tsc *)"
     ]
   }
 }

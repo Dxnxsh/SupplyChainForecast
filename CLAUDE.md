@@ -108,6 +108,7 @@ Also: `label_with_openrouter.py`, `label_data.py`. Default artifact paths are in
 | `ML_CLASSIFIER_PATH` | `model_training/classifier.pkl` | 3-tuple `(vectorizer, XGBClassifier, LabelEncoder)`; legacy 2-tuple still loads |
 | `DISRUPTION_CLASSIFIER_PATH` | `model_training/disruption_classifier.pkl` | XGBoost binary disruption; `predicted_disruption_probability` |
 | `IMPACT_REGRESSOR_PATH` | `model_training/impact_regressor_v2.pkl` | XGBoost regressor; `predicted_impact_score` (~0–300 scale; see rollup) |
+| `PERIGON_API_KEY` | _(required for Perigon ingest)_ | `python -m src.perigon_ingest` — historical news backfill (150 req/month) |
 | `OPENROUTER_API_KEY` | _(required for AI summary)_ | `POST .../ai-summary` |
 | `OPENROUTER_MODEL` | `openai/gpt-4o-mini` | Default chat model |
 | `OPENROUTER_HTTP_REFERER` | `http://127.0.0.1:8080` | OpenRouter header |

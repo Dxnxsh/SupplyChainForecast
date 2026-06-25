@@ -365,42 +365,18 @@ def _recompute_supplier_risk_scores(connection, node_name=None):
         SET current_risk_score = COALESCE(
             -- 1. Try to compute risk scores using recent events (last 30 days)
             (
-                SELECT ROUND(LEAST(100.0, COALESCE(0.62 * AVG(t.strength) + 0.38 * MAX(t.strength), 0.0))::numeric, 2)
-                FROM (
-                    SELECT LEAST(
-                        100.0,
-                        COALESCE(
-                            e.predicted_impact_score::double precision / 3.0,
-                            e.risk_score::double precision
-                        )
-                    ) AS strength
-                    FROM events AS e
-                    WHERE e.matched_node @> jsonb_build_array(s.node_name)
-                      AND e.article_timestamp >= NOW() - INTERVAL '30 days'
-                      AND (
-                          (e.risk_score IS NOT NULL AND e.risk_score > 0)
-                          OR e.predicted_impact_score IS NOT NULL
-                      )
-                ) AS t
+                SELECT ROUND(LEAST(100.0, COALESCE(AVG(LEAST(100.0, e.risk_score::double precision)), 0.0))::numeric, 2)
+                FROM events AS e
+                WHERE e.matched_node @> jsonb_build_array(s.node_name)
+                  AND e.article_timestamp >= NOW() - INTERVAL '30 days'
+                  AND e.risk_score IS NOT NULL AND e.risk_score > 0
             ),
             -- 2. Fall back to all-time events if no events occurred in the last 30 days (for backfills and historical analysis)
             (
-                SELECT ROUND(LEAST(100.0, COALESCE(0.62 * AVG(t.strength) + 0.38 * MAX(t.strength), 0.0))::numeric, 2)
-                FROM (
-                    SELECT LEAST(
-                        100.0,
-                        COALESCE(
-                            e.predicted_impact_score::double precision / 3.0,
-                            e.risk_score::double precision
-                        )
-                    ) AS strength
-                    FROM events AS e
-                    WHERE e.matched_node @> jsonb_build_array(s.node_name)
-                      AND (
-                          (e.risk_score IS NOT NULL AND e.risk_score > 0)
-                          OR e.predicted_impact_score IS NOT NULL
-                      )
-                ) AS t
+                SELECT ROUND(LEAST(100.0, COALESCE(AVG(LEAST(100.0, e.risk_score::double precision)), 0.0))::numeric, 2)
+                FROM events AS e
+                WHERE e.matched_node @> jsonb_build_array(s.node_name)
+                  AND e.risk_score IS NOT NULL AND e.risk_score > 0
             ),
             -- 3. Default to 0.0 if no events exist at all for this supplier
             0.0

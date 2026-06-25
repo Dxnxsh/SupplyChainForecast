@@ -8,11 +8,11 @@ const riskLevelFromScore = (score: number): RiskLevel => {
   return 'critical';
 };
 
-/** Buckets for supplier node exposure. Calibrated to actual DB range (current_risk_score typically 0–35 due to scoring formula). */
+/** Buckets for supplier node exposure. Calibrated to pure-avg risk_score range (typically 18–26 across active nodes). */
 const supplierExposureLevel = (exposure: number): RiskLevel => {
-  if (exposure <= 8) return 'low';
-  if (exposure <= 18) return 'medium';
-  if (exposure <= 30) return 'high';
+  if (exposure <= 20) return 'low';
+  if (exposure <= 22) return 'medium';
+  if (exposure <= 24) return 'high';
   return 'critical';
 };
 

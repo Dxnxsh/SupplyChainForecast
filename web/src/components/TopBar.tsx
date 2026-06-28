@@ -2,8 +2,8 @@ import { NavLink } from "react-router-dom";
 import { useEffect, useState } from "react";
 
 const NAV = [
-  { to: "/", label: "Situation", end: true },
-  { to: "/map", label: "Map" },
+  { to: "/", label: "Map", end: true },
+  { to: "/sectors", label: "Sectors" },
   { to: "/products", label: "Products" },
   { to: "/accuracy", label: "Accuracy" },
 ];

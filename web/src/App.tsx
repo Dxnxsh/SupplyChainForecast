@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom";
 import TopBar from "./components/TopBar";
+import MapView from "./pages/MapView";
 import Dashboard from "./pages/Dashboard";
 import Placeholder from "./pages/Placeholder";
 
@@ -8,16 +9,8 @@ export default function App() {
     <div className="wrap" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <TopBar />
       <Routes>
-        <Route path="/" element={<Dashboard />} />
-        <Route
-          path="/map"
-          element={
-            <Placeholder
-              title="Global situation map"
-              blurb="World map with the five sectors as geographic markers coloured by status, live disruption events plotted from geocoded news, and the Hormuz→Red Sea→Suez lane highlighting when shipping is disrupted. Next on the build list."
-            />
-          }
-        />
+        <Route path="/" element={<MapView />} />
+        <Route path="/sectors" element={<Dashboard />} />
         <Route
           path="/products"
           element={

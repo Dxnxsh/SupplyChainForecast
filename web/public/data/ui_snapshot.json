@@ -1,0 +1,930 @@
+{
+  "as_of": "2026-06-27",
+  "generated_at": "2026-06-28T18:16:43.298945+00:00",
+  "data_note": "Reflects latest available data date; live freshness requires live ingestion (T10).",
+  "summary": {
+    "active": 3,
+    "watch": 2,
+    "calm": 0,
+    "total_articles": 180939,
+    "clean_events": 557,
+    "event_days": 122
+  },
+  "sectors": [
+    {
+      "key": "shipping_chokepoints",
+      "name": "Shipping & oil routes",
+      "subtitle": "Strait of Hormuz \u00b7 Red Sea",
+      "icon": "ship",
+      "lat": 26.6,
+      "lon": 56.5,
+      "p": 0.086,
+      "outlook": "unlikely",
+      "likelihood": "low",
+      "status": "active",
+      "summary": "Recent disruptions detected in the news; conditions remain elevated.",
+      "headlines": [
+        {
+          "title": "Adnoc LNG Tanker Appears in Persian Gulf as Transparency Returns",
+          "date": "2026-06-25"
+        },
+        {
+          "title": "Alhasan: Iran Has Held the Gulf States & Hormuz Hostage",
+          "date": "2026-06-22"
+        },
+        {
+          "title": "Bloomberg This Weekend 6/21/2026",
+          "date": "2026-06-22"
+        }
+      ]
+    },
+    {
+      "key": "semiconductor_electronics",
+      "name": "Semiconductors & electronics",
+      "subtitle": "Taiwan \u00b7 Korea \u00b7 China",
+      "icon": "cpu",
+      "lat": 23.7,
+      "lon": 121.0,
+      "p": 0.086,
+      "outlook": "unlikely",
+      "likelihood": "low",
+      "status": "active",
+      "summary": "Recent disruptions detected in the news; conditions remain elevated.",
+      "headlines": [
+        {
+          "title": "\u2018FOMO Really Got Me\u2019: Taiwanese Go Deep Into Debt to Amp 100% Stock Rally",
+          "date": "2026-06-23"
+        },
+        {
+          "title": "'Unavoidable': Apple Plans Price Increases as the AI Memory Chip Crisis Worsens",
+          "date": "2026-06-18"
+        },
+        {
+          "title": "\"Have Bio Stocks Hit Bottom or Will They Fall Further?... 15 Trillion Won Wiped Out from KOSDAQ Bio in Half a Year\" - Th",
+          "date": "2026-06-23"
+        }
+      ]
+    },
+    {
+      "key": "european_auto",
+      "name": "European auto industry",
+      "subtitle": "Germany \u00b7 France \u00b7 Italy",
+      "icon": "car",
+      "lat": 51.2,
+      "lon": 10.4,
+      "p": 0.25,
+      "outlook": "possible",
+      "likelihood": "moderate",
+      "status": "watch",
+      "summary": "Some risk signals appearing in the news; no major disruption confirmed yet.",
+      "headlines": [
+        {
+          "title": "[Gasgoo Express] CATL profit exceeds combined total of 7 automakers; Mandatory LiDAR for L4? XPeng executive responds",
+          "date": "2026-06-22"
+        },
+        {
+          "title": "Advanced Driver Assistance Systems (ADAS) Market Landscape: Strategic Competition Across Key Regions and Segments",
+          "date": "2026-06-17"
+        },
+        {
+          "title": "Advanced Suspension Control System Market Trends Support A 9.8% CAGR Outlook Through The Forecast Period",
+          "date": "2026-06-15"
+        }
+      ]
+    },
+    {
+      "key": "critical_materials",
+      "name": "Critical materials & batteries",
+      "subtitle": "Lithium \u00b7 rare earths",
+      "icon": "battery-3",
+      "lat": -24.0,
+      "lon": -69.0,
+      "p": 0.25,
+      "outlook": "possible",
+      "likelihood": "moderate",
+      "status": "watch",
+      "summary": "Some risk signals appearing in the news; no major disruption confirmed yet.",
+      "headlines": [
+        {
+          "title": "'White Oil' Makes a Full Recovery",
+          "date": "2026-06-22"
+        },
+        {
+          "title": "American Critical Minerals Extends Early Warrant Exercise Incentive Program",
+          "date": "2026-06-19"
+        },
+        {
+          "title": "American Critical Minerals Extends Early Warrant Exercise Incentive Program \u2013 KBEW \u2013 The Information Station",
+          "date": "2026-06-18"
+        }
+      ]
+    },
+    {
+      "key": "us_logistics",
+      "name": "US ports & freight",
+      "subtitle": "West Coast \u00b7 trucking",
+      "icon": "truck",
+      "lat": 34.0,
+      "lon": -118.0,
+      "p": 0.086,
+      "outlook": "unlikely",
+      "likelihood": "low",
+      "status": "active",
+      "summary": "Recent disruptions detected in the news; conditions remain elevated.",
+      "headlines": [
+        {
+          "title": "Barstow International Gateway: BNSF's $4B Rail Hub Approved Amid Environmental Debate",
+          "date": "2026-06-18"
+        },
+        {
+          "title": "BNSF wins approval for $4bn California rail hub serving LA and Long Beach",
+          "date": "2026-06-19"
+        },
+        {
+          "title": "BNSF wins local approval for new $4B California rail intermodal project",
+          "date": "2026-06-18"
+        }
+      ]
+    }
+  ],
+  "map_points": [
+    {
+      "lat": 21.73748,
+      "lon": -78.79336,
+      "title": "Venezuela Struggles with Earthquake Rescue Efforts as Death Toll Nears 1,000",
+      "date": "2026-06-27"
+    },
+    {
+      "lat": 21.73748,
+      "lon": -78.79336,
+      "title": "Aid Groups Flock to Venezuela In Search-and-Rescue Frenzy",
+      "date": "2026-06-27"
+    },
+    {
+      "lat": 27.2381259,
+      "lon": 51.1972311,
+      "title": "Asian LNG Buyers Expect Qatar to Let Force Majeure Lapse in July",
+      "date": "2026-06-26"
+    },
+    {
+      "lat": 26.4494061,
+      "lon": 56.2027702,
+      "title": "These Six Tankers Show Hormuz Oil Flowing Despite Setbacks",
+      "date": "2026-06-26"
+    },
+    {
+      "lat": 26.4494061,
+      "lon": 56.2027702,
+      "title": "Saudi Arabia Is Ramping Up Oil Exports as Gulf Ports Restart",
+      "date": "2026-06-26"
+    },
+    {
+      "lat": 33.3936521,
+      "lon": -79.3811962,
+      "title": "Trade uncertainty leads South Carolina Ports to temporarily shut down container terminal",
+      "date": "2026-06-26"
+    },
+    {
+      "lat": 36.7014631,
+      "lon": -118.755997,
+      "title": "California: First ILWU strike against sugar giant in decades",
+      "date": "2026-06-26"
+    },
+    {
+      "lat": 55.75222,
+      "lon": 37.61556,
+      "title": "Key Kazakh Field Cuts Oil Output After Drones Hit Russian Plant",
+      "date": "2026-06-26"
+    },
+    {
+      "lat": 35.69439,
+      "lon": 51.42151,
+      "title": "UN agency pauses Hormuz ship evacuation plan after first vessel attack under peace deal",
+      "date": "2026-06-26"
+    },
+    {
+      "lat": 10.48801,
+      "lon": -66.87919,
+      "title": "Buildings collapse as quakes rock Venezuela, 'high casualties' likely",
+      "date": "2026-06-25"
+    },
+    {
+      "lat": 21.73748,
+      "lon": -78.79336,
+      "title": "Venezuela Earthquake Death Toll Rises to at Least 164",
+      "date": "2026-06-25"
+    },
+    {
+      "lat": 26.4494061,
+      "lon": 56.2027702,
+      "title": "Hormuz Reopening Is Quickly Flooding Oil Markets With Supply",
+      "date": "2026-06-25"
+    },
+    {
+      "lat": 27.2381259,
+      "lon": 51.1972311,
+      "title": "Strait of Hormuz evacuation plan to begin for ships stranded in Persian Gulf, maritime org",
+      "date": "2026-06-24"
+    },
+    {
+      "lat": 39.9075,
+      "lon": 116.39723,
+      "title": "Pimco Sees China\u2019s Export Glut Boosting Emerging-Market Bonds",
+      "date": "2026-06-24"
+    },
+    {
+      "lat": 51.0,
+      "lon": 10.0,
+      "title": "France suffers major power outage as Europe sizzles in record-breaking heat",
+      "date": "2026-06-24"
+    },
+    {
+      "lat": 39.7837304,
+      "lon": -100.445882,
+      "title": "Chuck Schumer\u2019s Chip Shortage",
+      "date": "2026-06-23"
+    },
+    {
+      "lat": 37.98869,
+      "lon": -84.47772,
+      "title": "Flash flooding turns Lexington streets into rivers, prompts water rescues",
+      "date": "2026-06-23"
+    },
+    {
+      "lat": 34.05223,
+      "lon": -118.24368,
+      "title": "Los Angeles Warehouse Fire Smoke Chokes Southern California for Fifth Day",
+      "date": "2026-06-23"
+    },
+    {
+      "lat": -28.10391,
+      "lon": 26.86593,
+      "title": "Yes, Virginia There Won't Be a Shutdown",
+      "date": "2026-06-23"
+    },
+    {
+      "lat": 51.0,
+      "lon": 10.0,
+      "title": "Starmer on Brink With Resignation Seen Imminent | The Opening Trade 6/22/2026",
+      "date": "2026-06-22"
+    },
+    {
+      "lat": -34.61315,
+      "lon": -58.37723,
+      "title": "Weak mag. 2.7 earthquake - Argentina on Sunday, Jun 21, 2026, at 06:16 am (GMT -4)",
+      "date": "2026-06-21"
+    },
+    {
+      "lat": 24.0,
+      "lon": 109.0,
+      "title": "Rescue operations underway in flood-hit regions in China's Guizhou, Guangxi",
+      "date": "2026-06-21"
+    },
+    {
+      "lat": 51.512773,
+      "lon": -0.0906448,
+      "title": "Efforts Underway for Safe Evacuation of Strait of Hormuz",
+      "date": "2026-06-21"
+    },
+    {
+      "lat": 40.8587621,
+      "lon": -73.9143063,
+      "title": "\"The Situation Has Become Unsustainable\": Apple To Hike Prices To Offset Soaring Memory Co",
+      "date": "2026-06-18"
+    },
+    {
+      "lat": 40.8587621,
+      "lon": -73.9143063,
+      "title": "Apple Price Hike: Memory Costs Force iPhone Premium",
+      "date": "2026-06-18"
+    },
+    {
+      "lat": 1.3024428,
+      "lon": 103.7983085,
+      "title": "Thursday storms cause flooding and damage across Kentucky",
+      "date": "2026-06-18"
+    },
+    {
+      "lat": 1.3024428,
+      "lon": 103.7983085,
+      "title": "Severe weather causes flooding, heavy damage across Kentucky",
+      "date": "2026-06-18"
+    },
+    {
+      "lat": 28.62137,
+      "lon": 77.2148,
+      "title": "India threatens to shut down iPhone factory for polluting farmland",
+      "date": "2026-06-15"
+    },
+    {
+      "lat": 28.62137,
+      "lon": 77.2148,
+      "title": "\"iPhone factory in India faces shutdown threat\" ... key supplier caught illegally discharg",
+      "date": "2026-06-14"
+    },
+    {
+      "lat": 11.3323723,
+      "lon": 78.6098639,
+      "title": "Tata's iPhone plant in Tamil Nadu faces shutdown threat over groundwater contamination cla",
+      "date": "2026-06-13"
+    },
+    {
+      "lat": 22.27832,
+      "lon": 114.17469,
+      "title": "Chinese Curbs Risk Derailing Record Hong Kong Home-Buying Spree",
+      "date": "2026-06-02"
+    },
+    {
+      "lat": 26.4494061,
+      "lon": 56.2027702,
+      "title": "Vitol Says Europe and US Aren\u2019t Facing Up to Oil Supply Crunch",
+      "date": "2026-06-02"
+    },
+    {
+      "lat": 35.69439,
+      "lon": 51.42151,
+      "title": "Trump Says Deal Will \u2018Work Out Well\u2019 Even as US, Iran Clash | The Opening Trade 6/1/2026",
+      "date": "2026-06-01"
+    },
+    {
+      "lat": 26.4494061,
+      "lon": 56.2027702,
+      "title": "Oil exports through the Strait of Hormuz might not return to levels seen before the Iran w",
+      "date": "2026-05-30"
+    }
+  ],
+  "metrics": {
+    "relevance": {
+      "task": "relevance_classifier",
+      "n_train": 7000,
+      "n_train_pos": 488,
+      "gold_n": 150,
+      "threshold": 0.5,
+      "classifier": {
+        "precision": 0.7708,
+        "recall": 0.5873,
+        "f1": 0.6667,
+        "accuracy": 0.7533
+      },
+      "keyword_baseline": {
+        "precision": 0.42,
+        "recall": 1.0,
+        "f1": 0.5915,
+        "accuracy": 0.42
+      },
+      "llm_strict_ref": {
+        "precision": 0.8,
+        "recall": 0.9524,
+        "f1": 0.8696,
+        "accuracy": 0.88
+      },
+      "beats_keyword_baseline": true
+    },
+    "relevance_embeddings": {
+      "task": "relevance_classifier_embeddings",
+      "encoder": "sentence-transformers/all-MiniLM-L6-v2",
+      "n_train": 7000,
+      "gold_n": 150,
+      "tfidf_baseline": {
+        "precision": 0.7708,
+        "recall": 0.5873,
+        "f1": 0.6667,
+        "accuracy": 0.7533
+      },
+      "embeddings": {
+        "emb_logreg": {
+          "at_0.5": {
+            "precision": 0.5657,
+            "recall": 0.8889,
+            "f1": 0.6914,
+            "accuracy": 0.6667
+          },
+          "best_thr": 0.59,
+          "at_best_thr": {
+            "precision": 0.6154,
+            "recall": 0.8889,
+            "f1": 0.7273,
+            "accuracy": 0.72
+          }
+        },
+        "emb_xgboost": {
+          "at_0.5": {
+            "precision": 0.7674,
+            "recall": 0.5238,
+            "f1": 0.6226,
+            "accuracy": 0.7333
+          },
+          "best_thr": 0.13,
+          "at_best_thr": {
+            "precision": 0.6912,
+            "recall": 0.746,
+            "f1": 0.7176,
+            "accuracy": 0.7533
+          }
+        }
+      },
+      "best_model": "emb_logreg"
+    },
+    "predictor": {
+      "task": "disruption_predictor",
+      "targets": [
+        "shipping_chokepoints",
+        "semiconductor_electronics",
+        "european_auto",
+        "critical_materials",
+        "us_logistics"
+      ],
+      "features": [
+        "vol_1d",
+        "vol_3d",
+        "vol_7d",
+        "vol_14d",
+        "sent_mean_3d",
+        "sent_mean_7d",
+        "sent_min_3d",
+        "sent_min_7d",
+        "sent_delta_3d",
+        "kw_hits_1d",
+        "kw_hits_3d",
+        "clean_cnt_3d",
+        "clean_cnt_7d",
+        "clean_cnt_14d",
+        "days_since_clean",
+        "cross_clean_3d"
+      ],
+      "dropped_features": [
+        "dow",
+        "is_weekend"
+      ],
+      "horizon_days": [
+        1,
+        3
+      ],
+      "split_date": "2026-02-01",
+      "n_total": 2700,
+      "n_train": 1980,
+      "n_test": 720,
+      "test_positives": 153,
+      "test_base_rate": 0.2125,
+      "predictor": {
+        "brier": 0.1765,
+        "auc": 0.6148,
+        "precision": 0.2974,
+        "recall": 0.5229,
+        "f1": 0.3791,
+        "operating_threshold": 0.09,
+        "calibration": "isotonic"
+      },
+      "persistence_baseline": {
+        "brier": 0.1903,
+        "precision": 0.5556,
+        "recall": 0.5229,
+        "f1": 0.5387
+      },
+      "beats_persistence_brier": true,
+      "onset_value_add": {
+        "onset_positives": 73,
+        "persistence_recall": 0.0,
+        "predictor_recall": 0.7123,
+        "predictor_precision": 0.2261,
+        "caught": 52,
+        "flagged": 230
+      },
+      "per_target": {
+        "shipping_chokepoints": {
+          "train_pos": 28,
+          "test_pos": 88
+        },
+        "semiconductor_electronics": {
+          "train_pos": 56,
+          "test_pos": 27
+        },
+        "european_auto": {
+          "train_pos": 44,
+          "test_pos": 18
+        },
+        "critical_materials": {
+          "train_pos": 37,
+          "test_pos": 15
+        },
+        "us_logistics": {
+          "train_pos": 18,
+          "test_pos": 5
+        }
+      },
+      "feature_importance": {
+        "vol_3d": 0.1537,
+        "vol_7d": 0.0856,
+        "vol_14d": 0.0765,
+        "sent_min_7d": 0.0699,
+        "kw_hits_1d": 0.0669,
+        "kw_hits_3d": 0.0666,
+        "sent_min_3d": 0.0645,
+        "cross_clean_3d": 0.0615,
+        "days_since_clean": 0.0589,
+        "sent_mean_7d": 0.0573,
+        "clean_cnt_14d": 0.0523,
+        "sent_mean_3d": 0.0495,
+        "sent_delta_3d": 0.0471,
+        "clean_cnt_7d": 0.0459,
+        "vol_1d": 0.042,
+        "clean_cnt_3d": 0.002
+      }
+    },
+    "predictor_test": {
+      "checks": {
+        "feature_truncation_invariance": {
+          "pass": true,
+          "rows_checked": 15,
+          "max_abs_diff_full_vs_truncated": 0.0,
+          "note": "features identical whether or not future data exists -> no leakage"
+        },
+        "calib_disjoint_from_test": {
+          "pass": true,
+          "calib_window": [
+            "2026-01-01",
+            "2026-02-01"
+          ],
+          "test_from": "2026-02-01"
+        },
+        "walk_forward": {
+          "n_folds": 10,
+          "mean_auc": 0.733,
+          "share_folds_auc_gt_0.55": 0.9,
+          "folds": [
+            {
+              "origin": "2025-08",
+              "train_pos": 76,
+              "test_n": 155,
+              "test_pos": 11,
+              "auc": 0.564,
+              "onset_recall@q75": 0.273,
+              "persistence_f1": 0.0
+            },
+            {
+              "origin": "2025-09",
+              "train_pos": 87,
+              "test_n": 150,
+              "test_pos": 24,
+              "auc": 0.822,
+              "onset_recall@q75": 0.636,
+              "persistence_f1": 0.08
+            },
+            {
+              "origin": "2025-10",
+              "train_pos": 111,
+              "test_n": 155,
+              "test_pos": 22,
+              "auc": 0.672,
+              "onset_recall@q75": 0.381,
+              "persistence_f1": 0.045
+            },
+            {
+              "origin": "2025-11",
+              "train_pos": 133,
+              "test_n": 150,
+              "test_pos": 9,
+              "auc": 0.883,
+              "onset_recall@q75": 0.889,
+              "persistence_f1": 0.0
+            },
+            {
+              "origin": "2025-12",
+              "train_pos": 142,
+              "test_n": 155,
+              "test_pos": 15,
+              "auc": 0.76,
+              "onset_recall@q75": 0.6,
+              "persistence_f1": 0.0
+            },
+            {
+              "origin": "2026-01",
+              "train_pos": 157,
+              "test_n": 155,
+              "test_pos": 26,
+              "auc": 0.675,
+              "onset_recall@q75": 0.391,
+              "persistence_f1": 0.098
+            },
+            {
+              "origin": "2026-02",
+              "train_pos": 183,
+              "test_n": 140,
+              "test_pos": 14,
+              "auc": 0.702,
+              "onset_recall@q75": 0.643,
+              "persistence_f1": 0.0
+            },
+            {
+              "origin": "2026-03",
+              "train_pos": 197,
+              "test_n": 155,
+              "test_pos": 51,
+              "auc": 0.513,
+              "onset_recall@q75": 0.583,
+              "persistence_f1": 0.535
+            },
+            {
+              "origin": "2026-04",
+              "train_pos": 248,
+              "test_n": 150,
+              "test_pos": 44,
+              "auc": 0.954,
+              "onset_recall@q75": 0.312,
+              "persistence_f1": 0.636
+            },
+            {
+              "origin": "2026-05",
+              "train_pos": 292,
+              "test_n": 155,
+              "test_pos": 25,
+              "auc": 0.786,
+              "onset_recall@q75": 0.111,
+              "persistence_f1": 0.64
+            }
+          ]
+        }
+      },
+      "summary": {
+        "leakage_tests_pass": true,
+        "walk_forward_mean_auc": 0.733,
+        "verdict": "signal is consistent across time"
+      }
+    },
+    "topics": {
+      "task": "topic_model",
+      "encoder": "sentence-transformers/all-MiniLM-L6-v2",
+      "n_docs": 557,
+      "n_topics": 12,
+      "n_outliers": 0,
+      "n_topics_mapping_to_target": 11,
+      "n_emergent": 1,
+      "acceptance_pass": true,
+      "topics": [
+        {
+          "topic": 0,
+          "size": 166,
+          "keywords": [
+            "blockade",
+            "trump",
+            "iran",
+            "hormuz",
+            "strait",
+            "strait hormuz"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.952,
+          "target_distribution": {
+            "shipping_chokepoints": 158,
+            "us_logistics": 2,
+            "semiconductor_electronics": 3,
+            "critical_materials": 2,
+            "european_auto": 1
+          },
+          "recent_90d_share": 0.873,
+          "example": "China's economy grew 5 percent in Q1 despite the Middle East war - Pravda EN",
+          "emergent": false
+        },
+        {
+          "topic": 1,
+          "size": 109,
+          "keywords": [
+            "oil",
+            "brent",
+            "barrel",
+            "crude",
+            "prices",
+            "oil prices"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.991,
+          "target_distribution": {
+            "shipping_chokepoints": 108,
+            "semiconductor_electronics": 1
+          },
+          "recent_90d_share": 0.697,
+          "example": "Brent Crude Prices Surge Amid Iran War and U.S. Blockade",
+          "emergent": false
+        },
+        {
+          "topic": 2,
+          "size": 60,
+          "keywords": [
+            "iran",
+            "war",
+            "israel",
+            "attacks",
+            "gas",
+            "qatar"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.783,
+          "target_distribution": {
+            "shipping_chokepoints": 47,
+            "us_logistics": 2,
+            "european_auto": 9,
+            "critical_materials": 1,
+            "semiconductor_electronics": 1
+          },
+          "recent_90d_share": 0.2,
+          "example": "\u2018Unprecedented\u2019: Israel, US carry out extensive strikes across Iran",
+          "emergent": false
+        },
+        {
+          "topic": 3,
+          "size": 38,
+          "keywords": [
+            "production",
+            "china",
+            "growth",
+            "chinas",
+            "uk",
+            "sales"
+          ],
+          "dominant_target": "european_auto",
+          "dominant_share": 0.474,
+          "target_distribution": {
+            "semiconductor_electronics": 10,
+            "critical_materials": 10,
+            "european_auto": 18
+          },
+          "recent_90d_share": 0.026,
+          "example": "'China Inside': How Chinese EV tech is reshaping global auto design",
+          "emergent": true
+        },
+        {
+          "topic": 4,
+          "size": 52,
+          "keywords": [
+            "war",
+            "energy",
+            "fuel",
+            "iran",
+            "global",
+            "prices"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.942,
+          "target_distribution": {
+            "shipping_chokepoints": 49,
+            "semiconductor_electronics": 1,
+            "critical_materials": 1,
+            "european_auto": 1
+          },
+          "recent_90d_share": 0.327,
+          "example": "Asia Wrap: Black Gold Rattles Markets as Oil Clears $100",
+          "emergent": false
+        },
+        {
+          "topic": 5,
+          "size": 27,
+          "keywords": [
+            "asian",
+            "shares",
+            "ai",
+            "stocks",
+            "chip",
+            "market"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.519,
+          "target_distribution": {
+            "semiconductor_electronics": 11,
+            "shipping_chokepoints": 14,
+            "european_auto": 2
+          },
+          "recent_90d_share": 0.63,
+          "example": "AI boom causing global memory crisis, warn Dell, HP and Lenovo",
+          "emergent": false
+        },
+        {
+          "topic": 6,
+          "size": 23,
+          "keywords": [
+            "flights",
+            "airlines",
+            "fuel",
+            "jet",
+            "flight",
+            "air"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.826,
+          "target_distribution": {
+            "shipping_chokepoints": 19,
+            "us_logistics": 3,
+            "european_auto": 1
+          },
+          "recent_90d_share": 0.261,
+          "example": "Iranian plane makes mysterious landing in Oman. Will Trump give Tehran one last chance?- T",
+          "emergent": false
+        },
+        {
+          "topic": 7,
+          "size": 15,
+          "keywords": [
+            "japan",
+            "russia",
+            "people",
+            "waves",
+            "killed",
+            "heavy"
+          ],
+          "dominant_target": "semiconductor_electronics",
+          "dominant_share": 0.733,
+          "target_distribution": {
+            "semiconductor_electronics": 11,
+            "critical_materials": 3,
+            "shipping_chokepoints": 1
+          },
+          "recent_90d_share": 0.133,
+          "example": "8.8 quake hits Russia, Japan, Hawaii coasts",
+          "emergent": false
+        },
+        {
+          "topic": 8,
+          "size": 23,
+          "keywords": [
+            "hormuz",
+            "oil",
+            "strait",
+            "strait hormuz",
+            "prices",
+            "iran"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.913,
+          "target_distribution": {
+            "shipping_chokepoints": 21,
+            "us_logistics": 2
+          },
+          "recent_90d_share": 0.696,
+          "example": "Buy US Oil Or Secure Hormuz Yourself\": Donald Trump's Message To Nations Facing Fuel Short",
+          "emergent": false
+        },
+        {
+          "topic": 9,
+          "size": 14,
+          "keywords": [
+            "port",
+            "tanker",
+            "oil",
+            "gulf",
+            "oman",
+            "operations"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 1.0,
+          "target_distribution": {
+            "shipping_chokepoints": 14
+          },
+          "recent_90d_share": 0.143,
+          "example": "LIVE: Saudi Arabia FORCES UAE To SURRENDER, UAE Forces Leave Yemen After Mukalla Port Stri",
+          "emergent": false
+        },
+        {
+          "topic": 10,
+          "size": 17,
+          "keywords": [
+            "points",
+            "oil",
+            "dollar",
+            "crude oil",
+            "100",
+            "crude"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.941,
+          "target_distribution": {
+            "shipping_chokepoints": 16,
+            "european_auto": 1
+          },
+          "recent_90d_share": 0.706,
+          "example": "Saudi assurance on oil shipments lifts PSX",
+          "emergent": false
+        },
+        {
+          "topic": 11,
+          "size": 13,
+          "keywords": [
+            "gold",
+            "dollar",
+            "ceasefire",
+            "april",
+            "prices",
+            "thursday"
+          ],
+          "dominant_target": "shipping_chokepoints",
+          "dominant_share": 0.923,
+          "target_distribution": {
+            "shipping_chokepoints": 12,
+            "critical_materials": 1
+          },
+          "recent_90d_share": 0.846,
+          "example": "Copper Extends Gains on Mideast Optimism | Hellenic Shipping News Worldwide",
+          "emergent": false
+        }
+      ]
+    }
+  }
+}

@@ -1,14 +1,14 @@
 {
-  "as_of": "2026-06-27",
-  "generated_at": "2026-06-28T18:16:43.298945+00:00",
-  "data_note": "Reflects latest available data date; live freshness requires live ingestion (T10).",
+  "as_of": "2026-06-28",
+  "generated_at": "2026-06-28T21:22:07.751080+00:00",
+  "data_note": "Live \u2014 updated each ingestion cycle (T10).",
   "summary": {
-    "active": 3,
-    "watch": 2,
+    "active": 4,
+    "watch": 1,
     "calm": 0,
-    "total_articles": 180939,
-    "clean_events": 557,
-    "event_days": 122
+    "total_articles": 180940,
+    "clean_events": 558,
+    "event_days": 123
   },
   "sectors": [
     {
@@ -45,7 +45,7 @@
       "icon": "cpu",
       "lat": 23.7,
       "lon": 121.0,
-      "p": 0.086,
+      "p": 0.0,
       "outlook": "unlikely",
       "likelihood": "low",
       "status": "active",
@@ -102,8 +102,8 @@
       "p": 0.25,
       "outlook": "possible",
       "likelihood": "moderate",
-      "status": "watch",
-      "summary": "Some risk signals appearing in the news; no major disruption confirmed yet.",
+      "status": "active",
+      "summary": "Recent disruptions detected in the news; conditions remain elevated.",
       "headlines": [
         {
           "title": "'White Oil' Makes a Full Recovery",
@@ -126,9 +126,9 @@
       "icon": "truck",
       "lat": 34.0,
       "lon": -118.0,
-      "p": 0.086,
-      "outlook": "unlikely",
-      "likelihood": "low",
+      "p": 0.25,
+      "outlook": "possible",
+      "likelihood": "moderate",
       "status": "active",
       "summary": "Recent disruptions detected in the news; conditions remain elevated.",
       "headlines": [
@@ -161,9 +161,9 @@
       "date": "2026-06-27"
     },
     {
-      "lat": 27.2381259,
-      "lon": 51.1972311,
-      "title": "Asian LNG Buyers Expect Qatar to Let Force Majeure Lapse in July",
+      "lat": 55.75222,
+      "lon": 37.61556,
+      "title": "Key Kazakh Field Cuts Oil Output After Drones Hit Russian Plant",
       "date": "2026-06-26"
     },
     {
@@ -173,9 +173,9 @@
       "date": "2026-06-26"
     },
     {
-      "lat": 26.4494061,
-      "lon": 56.2027702,
-      "title": "Saudi Arabia Is Ramping Up Oil Exports as Gulf Ports Restart",
+      "lat": 35.69439,
+      "lon": 51.42151,
+      "title": "UN agency pauses Hormuz ship evacuation plan after first vessel attack under peace deal",
       "date": "2026-06-26"
     },
     {
@@ -185,22 +185,28 @@
       "date": "2026-06-26"
     },
     {
+      "lat": 26.4494061,
+      "lon": 56.2027702,
+      "title": "Saudi Arabia Is Ramping Up Oil Exports as Gulf Ports Restart",
+      "date": "2026-06-26"
+    },
+    {
       "lat": 36.7014631,
       "lon": -118.755997,
       "title": "California: First ILWU strike against sugar giant in decades",
       "date": "2026-06-26"
     },
     {
-      "lat": 55.75222,
-      "lon": 37.61556,
-      "title": "Key Kazakh Field Cuts Oil Output After Drones Hit Russian Plant",
+      "lat": 27.2381259,
+      "lon": 51.1972311,
+      "title": "Asian LNG Buyers Expect Qatar to Let Force Majeure Lapse in July",
       "date": "2026-06-26"
     },
     {
-      "lat": 35.69439,
-      "lon": 51.42151,
-      "title": "UN agency pauses Hormuz ship evacuation plan after first vessel attack under peace deal",
-      "date": "2026-06-26"
+      "lat": 26.4494061,
+      "lon": 56.2027702,
+      "title": "Hormuz Reopening Is Quickly Flooding Oil Markets With Supply",
+      "date": "2026-06-25"
     },
     {
       "lat": 10.48801,
@@ -215,18 +221,6 @@
       "date": "2026-06-25"
     },
     {
-      "lat": 26.4494061,
-      "lon": 56.2027702,
-      "title": "Hormuz Reopening Is Quickly Flooding Oil Markets With Supply",
-      "date": "2026-06-25"
-    },
-    {
-      "lat": 27.2381259,
-      "lon": 51.1972311,
-      "title": "Strait of Hormuz evacuation plan to begin for ships stranded in Persian Gulf, maritime org",
-      "date": "2026-06-24"
-    },
-    {
       "lat": 39.9075,
       "lon": 116.39723,
       "title": "Pimco Sees China\u2019s Export Glut Boosting Emerging-Market Bonds",
@@ -239,10 +233,10 @@
       "date": "2026-06-24"
     },
     {
-      "lat": 39.7837304,
-      "lon": -100.445882,
-      "title": "Chuck Schumer\u2019s Chip Shortage",
-      "date": "2026-06-23"
+      "lat": 27.2381259,
+      "lon": 51.1972311,
+      "title": "Strait of Hormuz evacuation plan to begin for ships stranded in Persian Gulf, maritime org",
+      "date": "2026-06-24"
     },
     {
       "lat": 37.98869,
@@ -254,6 +248,12 @@
       "lat": 34.05223,
       "lon": -118.24368,
       "title": "Los Angeles Warehouse Fire Smoke Chokes Southern California for Fifth Day",
+      "date": "2026-06-23"
+    },
+    {
+      "lat": 39.7837304,
+      "lon": -100.445882,
+      "title": "Chuck Schumer\u2019s Chip Shortage",
       "date": "2026-06-23"
     },
     {
@@ -287,6 +287,12 @@
       "date": "2026-06-21"
     },
     {
+      "lat": 1.3024428,
+      "lon": 103.7983085,
+      "title": "Severe weather causes flooding, heavy damage across Kentucky",
+      "date": "2026-06-18"
+    },
+    {
       "lat": 40.8587621,
       "lon": -73.9143063,
       "title": "\"The Situation Has Become Unsustainable\": Apple To Hike Prices To Offset Soaring Memory Co",
@@ -302,12 +308,6 @@
       "lat": 1.3024428,
       "lon": 103.7983085,
       "title": "Thursday storms cause flooding and damage across Kentucky",
-      "date": "2026-06-18"
-    },
-    {
-      "lat": 1.3024428,
-      "lon": 103.7983085,
-      "title": "Severe weather causes flooding, heavy damage across Kentucky",
       "date": "2026-06-18"
     },
     {
@@ -329,15 +329,15 @@
       "date": "2026-06-13"
     },
     {
-      "lat": 22.27832,
-      "lon": 114.17469,
-      "title": "Chinese Curbs Risk Derailing Record Hong Kong Home-Buying Spree",
-      "date": "2026-06-02"
-    },
-    {
       "lat": 26.4494061,
       "lon": 56.2027702,
       "title": "Vitol Says Europe and US Aren\u2019t Facing Up to Oil Supply Crunch",
+      "date": "2026-06-02"
+    },
+    {
+      "lat": 22.27832,
+      "lon": 114.17469,
+      "title": "Chinese Curbs Risk Derailing Record Hong Kong Home-Buying Spree",
       "date": "2026-06-02"
     },
     {
@@ -351,6 +351,19 @@
       "lon": 56.2027702,
       "title": "Oil exports through the Strait of Hormuz might not return to levels seen before the Iran w",
       "date": "2026-05-30"
+    }
+  ],
+  "feed": [
+    {
+      "ts": "Sun, 28 Jun 2026 17:56:07 +0000",
+      "source": "FreightWaves",
+      "title": "China Southern strikes landmark deal for Boeing cargo jets",
+      "url": "https://www.freightwaves.com/news/china-southern-strikes-landmark-deal-for-boeing-cargo-jets",
+      "relevance_p": 0.6412,
+      "relevant": true,
+      "theme": "China electronics manufacturing",
+      "sentiment_score": 0.715,
+      "sector_key": "semiconductor_electronics"
     }
   ],
   "metrics": {

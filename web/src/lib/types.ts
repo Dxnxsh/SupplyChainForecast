@@ -27,6 +27,18 @@ export interface MapPoint {
   date: string;
 }
 
+export interface FeedEntry {
+  ts: string;
+  source: string;
+  title: string;
+  url: string;
+  relevance_p: number;
+  relevant: boolean;
+  theme: string | null;
+  sentiment_score: number;
+  sector_key: string | null;
+}
+
 export interface Snapshot {
   as_of: string;
   generated_at: string;
@@ -41,5 +53,6 @@ export interface Snapshot {
   };
   sectors: Sector[];
   map_points: MapPoint[];
+  feed: FeedEntry[];
   metrics: Record<string, unknown>;
 }

@@ -4,6 +4,7 @@ import MapView from "./pages/MapView";
 import Dashboard from "./pages/Dashboard";
 import Accuracy from "./pages/Accuracy";
 import Products from "./pages/Products";
+import Feed from "./pages/Feed";
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
         <Route path="/sectors" element={<Dashboard />} />
         <Route path="/products" element={<Products />} />
         <Route path="/accuracy" element={<Accuracy />} />
+        <Route path="/feed" element={<Feed />} />
       </Routes>
     </div>
   );

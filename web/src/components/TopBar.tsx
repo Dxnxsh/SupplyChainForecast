@@ -6,6 +6,7 @@ const NAV = [
   { to: "/sectors", label: "Sectors" },
   { to: "/products", label: "Products" },
   { to: "/accuracy", label: "Accuracy" },
+  { to: "/feed", label: "Live feed" },
 ];
 
 export default function TopBar({ asOf }: { asOf?: string }) {

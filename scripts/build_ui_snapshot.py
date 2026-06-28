@@ -99,18 +99,56 @@ def load_metric(path):
     return json.load(open(path)) if os.path.exists(path) else None
 
 
+def live_summary(conn):
+    """Live dataset counts — replaces the hardcoded numbers."""
+    total = conn.execute(text("SELECT COUNT(*) FROM events")).scalar() or 0
+    clean = conn.execute(text(
+        "SELECT COUNT(*) FROM disruption_candidates WHERE is_risk_event AND strict_is_risk"
+    )).scalar() or 0
+    event_days = conn.execute(text(
+        "SELECT COUNT(DISTINCT article_date) FROM disruption_candidates "
+        "WHERE is_risk_event AND strict_is_risk AND article_date IS NOT NULL"
+    )).scalar() or 0
+    return int(total), int(clean), int(event_days)
+
+
+def load_feed(path="data/live_feed.json", limit=120) -> list:
+    if not os.path.exists(path):
+        return []
+    try:
+        entries = json.load(open(path))
+        return entries[:limit]
+    except Exception:
+        return []
+
+
+def max_db_date(conn) -> str | None:
+    row = conn.execute(text("SELECT MAX(article_timestamp)::date FROM events")).fetchone()
+    return str(row[0]) if row and row[0] else None
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--as-of", default=GRID_END, help="snapshot date (YYYY-MM-DD); default = latest grid date")
+    ap.add_argument("--as-of", default=None,
+                    help="snapshot date (YYYY-MM-DD); default = max(article_timestamp) from DB")
     args = ap.parse_args()
-    as_of = pd.Timestamp(args.as_of)
 
     with open(MODEL, "rb") as f:
         bundle = pickle.load(f)
     model, cal, cal_kind, feats = bundle["model"], bundle["calibrator"], bundle["cal_kind"], bundle["features"]
 
-    full_idx = pd.date_range(LOOKBACK_START, as_of, freq="D")
     engine = create_engine(get_read_db_url())
+    with engine.connect() as conn:
+        db_max = max_db_date(conn)
+
+    if args.as_of:
+        as_of = pd.Timestamp(args.as_of)
+    elif db_max:
+        as_of = pd.Timestamp(db_max)
+    else:
+        as_of = pd.Timestamp(GRID_END)
+
+    full_idx = pd.date_range(LOOKBACK_START, as_of, freq="D")
     sectors, points = [], []
     with engine.connect() as conn:
         g = conn.execute(text("""
@@ -138,17 +176,32 @@ def main():
                 "headlines": recent_headlines(conn, TARGET_KEYWORDS[key], as_of),
             })
         points = map_points(conn, as_of)
+        total_articles, clean_events, event_days = live_summary(conn)
 
     n_active = sum(1 for s in sectors if s["status"] == "active")
     n_watch = sum(1 for s in sectors if s["status"] == "watch")
+
+    # Live feed[] block — written by ingest_live each cycle
+    feed = load_feed()
+
     snapshot = {
         "as_of": str(as_of.date()),
         "generated_at": pd.Timestamp.utcnow().isoformat(),
-        "data_note": "Reflects latest available data date; live freshness requires live ingestion (T10).",
-        "summary": {"active": n_active, "watch": n_watch, "calm": len(sectors) - n_active - n_watch,
-                    "total_articles": 180939, "clean_events": 557, "event_days": 122},
+        "data_note": (
+            "Live — updated each ingestion cycle (T10)."
+            if db_max and db_max >= str(as_of.date())
+            else "Reflects latest available data date; run ingest_live to update."
+        ),
+        "summary": {
+            "active": n_active, "watch": n_watch,
+            "calm": len(sectors) - n_active - n_watch,
+            "total_articles": total_articles,
+            "clean_events": clean_events,
+            "event_days": event_days,
+        },
         "sectors": sectors,
         "map_points": points,
+        "feed": feed,
         "metrics": {
             "relevance": load_metric("data/relevance_metrics.json"),
             "relevance_embeddings": load_metric("data/relevance_metrics_embeddings.json"),

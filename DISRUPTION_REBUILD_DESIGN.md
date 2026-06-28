@@ -179,19 +179,28 @@ backtest-replay scrubber (leakage-free), SHAP why-panel, prospective tracker.
   - T3 Human gold set — DONE. Full clean-set gold (`data/gold_set_full.csv`, n=150):
     **precision 80%, recall 95%, F1 87%**. This is the trusted evaluation set for the relevance
     classifier.
-- **Phase 2 — Own NLP models (TODO):**
-  - T4 Pull **easy negatives** (random non-disruption news from the 180k) to round out the
-    relevance training set.
-  - T5 **Relevance classifier** — train on LLM labels (pos + hard negs + easy negs); eval vs gold
-    set; compare to keyword baseline. Replaces the live LLM.
-  - T6 **Topic model** (BERTopic / LDA) over relevance-filtered events → open-vocab themes +
-    emergent-theme discovery; map to the consolidated targets.
-- **Phase 3 — Predictor + eval + UI (handoff target):**
-  - T7 (target, day) feature build from RAW stream + pooled calibrated predictor (no severity head).
-  - T8 Walk-forward eval + leakage tests + baseline (guard the 2026-03 spike in the split).
-  - T9 In-UI metrics surface.
+- **Phase 2 — Own NLP models (T4/T5 DONE; T6 optional):**
+  - T4 **(DONE)** Easy negatives — 2,500 random non-`CANDIDATE_RE` articles → `easy_negatives`
+    table. `scripts/build_easy_negatives.py`.
+  - T5 **(DONE)** Relevance classifier (TF-IDF + XGBoost) — F1 **67%** vs keyword baseline 59%
+    (PASS), oracle 87%. Recall (59%) is the weak link. `scripts/train_relevance_classifier.py`.
+  - T6 **(optional, not built)** Topic model (BERTopic / LDA) over relevance-filtered events →
+    open-vocab themes + emergent-theme discovery; map to the consolidated targets.
+- **Phase 3 — Predictor + eval + UI:**
+  - T7 **(DONE)** (target, day) feature grid from RAW stream + pooled calibrated predictor (no
+    severity head). Chosen config: pooled, `dow` dropped. `scripts/train_predictor.py`. See §14.
+  - T8 **(DONE)** Leakage + walk-forward tests — truncation-invariance max diff 0.0 (no leak),
+    calib disjoint, **walk-forward mean AUC 0.733** (90% folds >0.55). `scripts/test_predictor.py`.
+  - T9 **(NEXT)** In-UI metrics surface — read `data/relevance_metrics.json`,
+    `data/predictor_metrics.json`, `data/predictor_test_report.json` into the dashboard.
   - T10 Live ingestion (RSS + Perigon recent window) → relevance classifier → topic model (no LLM).
 - **Phase 4 — Stretch:** T11 scheduled-event lead-time extraction.
+
+**Model-improvement menu (decide before/after T9 — testing showed the model is already
+defensible, so these are polish, not rescue):** (B) lift T5 relevance recall with
+sentence-transformer embeddings — the genuine weak link; (C) add embedding features to T7
+(marginal, walk-forward already 0.73); (D) extend the cascade for more labeled positives
+(only 122 event-days — highest lever, but more Gemini cost). Recommended order if pursued: B → D.
 
 ### Build artifacts already in the repo (handoff state)
 - `src/gemini_client.py` — Agent Platform / Gemini client (express api_key OR ADC; JSON mode).
@@ -327,12 +336,29 @@ Scripts: `scripts/build_easy_negatives.py` (T4), `train_relevance_classifier.py`
   P=77% R=59% **F1=67%** vs keyword baseline F1=59% (**PASS**) and LLM-strict oracle F1=87%.
   Precision is near-oracle; **recall is the lever** (lower threshold / sentence-transformer embeddings).
 - **T7 predictor** (pooled, calibrated XGBoost; split keeps 2026-03 spike in test):
-  - **Chosen config = pooled, `dow`/`is_weekend` dropped.** Test (n=720, 21% base rate):
+  - **Chosen config = pooled, `dow`/`is_weekend` dropped.** Single-split test (n=720, 21% base rate):
     AUC 0.61, **onset recall 71% (52/73)** at 23% precision; F1 38% vs persistence 54%.
   - **Headline = onset detection:** persistence (clustering rule) has **0% recall on new-onset
     disruptions by construction**; the news model catches 71% of them. That is the real "prediction."
   - Driving features (post-`dow`): `vol_3d/7d/14d` (article-volume momentum), `sent_min_3d/7d`
     (negative-sentiment spikes), `kw_hits_1d/3d`, `cross_clean_3d`. Clean "predict-from-news" story.
+- **T8 leakage + walk-forward tests** (`scripts/test_predictor.py`, report
+  `data/predictor_test_report.json`):
+  - **No leakage (proven):** feature truncation-invariance — rebuilding every feature with future
+    data hidden gives byte-identical values (max |full−truncated| = 0.0 over 15 cells). Calib slice
+    disjoint from test. Both hard assertions PASS.
+  - **Walk-forward (10 monthly rolling origins, each trained only on its past): mean AUC 0.733,
+    90% of folds >0.55.** The single 2026-02 split (AUC 0.61) was pessimistic; the signal generalizes.
+  - **Complementarity demonstrated:** in sparse/early folds (2025-08→2026-02) persistence F1 ≈ 0
+    while the model holds AUC 0.56–0.88 — news carries the signal exactly when clustering can't.
+    The lone weak fold is 2026-03 (AUC 0.51), the pervasive-disruption spike where ranking is hard
+    and persistence finally works (F1 0.53). Honest and explainable.
+
+### Current standing (as of T8) — viva-defensible
+Leakage-proven pipeline; relevance F1 0.67 (>baseline); predictor walk-forward AUC 0.733 with
+onset recall 71% on new disruptions persistence cannot predict. The honest framing is **onset
+anticipation + calibrated ranking from news content**, NOT beating persistence on raw F1 (it can't;
+disruptions cluster) and NOT Brier (a constant base-rate ~0.166 beats everyone). Remaining: T9 UI.
 
 ### Phase-2 lessons (hard-won — fold into §13)
 - **`dow` (day-of-week) is a confound — drop it.** As a feature it dominated importance (0.27)

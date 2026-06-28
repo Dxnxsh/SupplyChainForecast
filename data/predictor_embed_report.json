@@ -1,0 +1,20 @@
+{
+  "task": "predictor_embedding_ablation",
+  "encoder": "sentence-transformers/all-MiniLM-L6-v2",
+  "single_split": {
+    "auc_base": 0.6449,
+    "auc_base_plus_sem": 0.5972,
+    "delta": -0.0477,
+    "sem_importance": {
+      "sem_sim_3d": 0.0546,
+      "sem_sim_7d": 0.0462
+    }
+  },
+  "walk_forward": {
+    "mean_auc_base": 0.7332,
+    "mean_auc_base_plus_sem": 0.716,
+    "delta": -0.0172,
+    "n_folds": 10
+  },
+  "verdict": "embeddings do NOT meaningfully help the predictor"
+}

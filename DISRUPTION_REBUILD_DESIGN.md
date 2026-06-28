@@ -451,9 +451,13 @@ The predictor + snapshot read exactly two tables. Live writes must satisfy both:
   `article_url`, `article_source`, `article_title`, `article_timestamp` (timestamp), `event_text_segment`
   (body/summary), `sentiment_score` (DOUBLE), `sentiment_label`, and best-effort `latitude`/`longitude`.
   Consumed by `daily_news()` (per-day count + `AVG/MIN(sentiment_score)` over a keyword-regex slice) and
-  `map_points()` (lat/lon dots). **`sentiment_score` must be on the same scale/sign as the existing
-  corpus** — verify the historical convention first (FinBERT signed −1..1) and match it, or the
-  `sent_mean/min` features shift under the model. This is a correctness gate, not a nicety.
+  `map_points()` (lat/lon dots). **Sentiment scale is RESOLVED:** the corpus convention is signed
+  **[−1, 1], neutral = 0.0** (verified: min −0.977, max 0.963, 0 nulls), produced by
+  `src.sentiment_finbert.analyze_finbert` / `batch_analyze_finbert` (FinBERT, returns
+  `{label, sentiment_score∈[−1,1], confidence}` — positive → +conf, negative → −conf, neutral → 0).
+  **Call that function directly** — do not invent a new sentiment path or the `sent_mean/min` features
+  shift under the fixed model. (All deps — `feedparser`, `sentence_transformers`, `transformers`,
+  `vaderSentiment` — already in `venv311`; nothing to install.)
 - **`disruption_candidates`** (clean-event layer, PK `article_title`). A clean event =
   `is_risk_event AND strict_is_risk`. Live insert for a **relevant** article sets **both true in one
   shot** (the embeddings classifier was trained positive = `is_risk_event AND strict_is_risk` (557),
@@ -473,8 +477,8 @@ RSS feeds (primary, live) + Perigon recent window (supplement, last 24–72h)
   → sentiment: FinBERT (match corpus scale) → sentiment_score, sentiment_label
   → geocode (best-effort, non-blocking): GLiNER2 NER → geocode cache → lat/lon
   → INSERT events (ON CONFLICT (article_url) DO NOTHING)
-  → relevance: MiniLM encode title+body ONCE; emb classifier P(disruption)
-       P ≥ thr ?  ── yes ─→ theme-router (reuse same MiniLM vector):
+  → relevance: MiniLM encode title+body ONCE; emb_logreg classifier P(disruption); thr = 0.59
+       P ≥ 0.59 ? ── yes ─→ theme-router (reuse same MiniLM vector):
        │                      cosine to per-theme prototypes; take themes ≥ τ (top-k, k≤2);
        │                      fallback to per-theme keyword regex if none clear τ
        │                    → INSERT disruption_candidates (is_risk_event=t, strict_is_risk=t, themes=…)
@@ -489,10 +493,12 @@ No call to `src.gemini_client` / OpenRouter / OpenModel anywhere on this path �
    `model_training/theme_prototypes.pkl` = `{encoder_name, themes:[…], protos: np.ndarray[12×384]}`.
    This is the LLM-free theme assigner; prototypes come from the already-labeled positives.
 2. **`scripts/live_label.py`** (shared labeler, importable). Loads `relevance_classifier_emb.pkl`
-   + `theme_prototypes.pkl`; one MiniLM encoder instance. `label_batch(texts) -> [{relevant, P,
-   themes, top_theme, sim}]`. Threshold from `data/relevance_metrics_embeddings.json` (use the
-   recall-favoring operating point ≈0.5; document the exact value). τ for theme cosine ≈0.30
-   (tune on the 557; pick so ≥95% of known positives route to their gold theme).
+   (`{encoder_name, classifier=LogReg, best_model}` — `classifier.predict_proba(X)[:,1]`) +
+   `theme_prototypes.pkl`; one MiniLM encoder instance, `normalize_embeddings=True`.
+   `label_batch(texts) -> [{relevant, P, themes, top_theme, sim}]`. **Threshold = 0.59** (the
+   documented `best_thr` in `relevance_metrics_embeddings.json`: R=0.889, P=0.615, F1=0.727 vs 0.5's
+   F1=0.691). τ for theme cosine ≈0.30 (tune on the 557; pick so ≥95% of known positives route to
+   their gold theme).
 3. **`scripts/ingest_live.py`** (slim runner — fresh, NOT legacy `rss_ingest.py`). Reuses only:
    `feedparser` parse helpers (`_strip_html`, `_entry_timestamp`), `src.sentiment_finbert`,
    optionally `src.preprocessing`(GLiNER2)+`src.geocoding`, `src.db_config`. Drops all legacy
@@ -502,9 +508,12 @@ No call to `src.gemini_client` / OpenRouter / OpenModel anywhere on this path �
    `scripts.build_ui_snapshot` with `--as-of` = max(`article_timestamp`)::date.
 4. **`config/rss_feeds.json`** — copy from `legacy/config/rss_feeds.json` (JSON array of
    `{url, source}`). Curated supply-chain + general-news feeds.
-5. **Perigon** — reuse `legacy/src/perigon_ingest.py` fetch (`fetch_*`, budget ledger, seen-url
-   cache) but route raw articles through the slim insert+label path, NOT its legacy event builder.
-   Perigon reaches ~3 months back, 150 req/month — use as a recent-window supplement only.
+5. **Perigon (OPTIONAL — RSS alone makes a working T10).** The 15 RSS feeds in
+   `legacy/config/rss_feeds.json` (SupplyChainDive, FreightWaves, Reuters, JOC, Labor Notes, …) are
+   live and sufficient to demo. Perigon is a recent-window supplement only (≤3 months back, 150
+   req/month). **Open micro-decision if pursued:** legacy `perigon_ingest.fetch_articles_for_node`
+   is supplier-node-centric; v2 is theme-centric, so send one broad supply-chain query (or per-theme
+   queries) instead of per-node. Defer unless RSS volume proves too thin.
 6. **`web/src/pages/Feed.tsx`** — new 5th view **"Live feed / Evidence"** (route `/feed`, add to
    `TopBar`). The transparency page that proves the model isn't a black box: a reverse-chronological
    table of recently ingested articles, each row = `time · source · headline · relevance P
@@ -572,3 +581,19 @@ overlap is harmless.
 Predictor retraining on live-grown positives (T-future "D: more labels"); scheduled-event lead-time
 extraction (T11); a FastAPI read layer replacing the static snapshot JSON; backfilling geocode for
 historical rows. T10 is ingestion + live labeling only.
+
+### 16.8 Known risks & micro-decisions (named, not blockers)
+- **RSS body is short.** Feeds give title + a short summary; the classifier trained on title+body
+  from the corpus. Encode `title + " " + summary`; accept that thin summaries lower confidence. If
+  recall drops, optionally fetch the article page body (adds latency + a dependency) — defer.
+- **`disruption_candidates.article_id` linkage.** Insert `events` first; the predictor/snapshot
+  never join on `article_id` (they key on `article_title` / `themes` / dates), so set `article_id`
+  to the returned `events.id` (or leave null) — not load-bearing. `article_title` is the PK and the
+  real dedup key; use `ON CONFLICT (article_title) DO NOTHING`.
+- **Geocoding is optional.** GLiNER2 NER + geocode (`src.preprocessing` + `src.geocoding`) is heavy
+  and only feeds map *dots* (sector markers use fixed coords). Ship `--no-geocode` as a clean path;
+  enable best-effort when the models load.
+- **Encode-once discipline.** One MiniLM `encode()` per article feeds BOTH relevance and theme
+  routing; never re-encode in `build_ui_snapshot` — read `relevance_p`/`theme` back from the DB.
+- **Dependencies & sentiment scale are already resolved** (§16.1) — no installs, call
+  `analyze_finbert`. The only numbers Sonnet must *tune* are τ (theme cosine) on the 557.

@@ -1,0 +1,45 @@
+{
+  "task": "relevance_classifier_embeddings",
+  "encoder": "sentence-transformers/all-MiniLM-L6-v2",
+  "n_train": 7000,
+  "gold_n": 150,
+  "tfidf_baseline": {
+    "precision": 0.7708,
+    "recall": 0.5873,
+    "f1": 0.6667,
+    "accuracy": 0.7533
+  },
+  "embeddings": {
+    "emb_logreg": {
+      "at_0.5": {
+        "precision": 0.5657,
+        "recall": 0.8889,
+        "f1": 0.6914,
+        "accuracy": 0.6667
+      },
+      "best_thr": 0.59,
+      "at_best_thr": {
+        "precision": 0.6154,
+        "recall": 0.8889,
+        "f1": 0.7273,
+        "accuracy": 0.72
+      }
+    },
+    "emb_xgboost": {
+      "at_0.5": {
+        "precision": 0.7674,
+        "recall": 0.5238,
+        "f1": 0.6226,
+        "accuracy": 0.7333
+      },
+      "best_thr": 0.13,
+      "at_best_thr": {
+        "precision": 0.6912,
+        "recall": 0.746,
+        "f1": 0.7176,
+        "accuracy": 0.7533
+      }
+    }
+  },
+  "best_model": "emb_logreg"
+}

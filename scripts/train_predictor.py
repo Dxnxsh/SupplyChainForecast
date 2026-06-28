@@ -176,6 +176,25 @@ def prf(y, p):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--targets", default="all", help="comma list of target keys, or 'all'")
+    ap.add_argument("--drop", default="", help="comma list of features to drop (e.g. dow,is_weekend)")
+    ap.add_argument("--tag", default="", help="suffix for output files (e.g. shipping)")
+    args = ap.parse_args()
+
+    sel = list(TARGETS) if args.targets == "all" else [t.strip() for t in args.targets.split(",")]
+    bad = [t for t in sel if t not in TARGETS]
+    if bad:
+        raise SystemExit(f"unknown targets: {bad}; valid: {list(TARGETS)}")
+    drop = {d.strip() for d in args.drop.split(",") if d.strip()}
+    FEAT = [f for f in FEATURES if f not in drop]
+    tag = f"_{args.tag}" if args.tag else ""
+    model_out = MODEL_OUT.replace(".pkl", f"{tag}.pkl")
+    metrics_out = METRICS_OUT.replace(".json", f"{tag}.json")
+    dataset_out = DATASET_OUT.replace(".csv", f"{tag}.csv")
+    print(f"targets={sel}  features={len(FEAT)} (dropped={sorted(drop) or 'none'})")
+
     full_idx = pd.date_range(LOOKBACK_START, GRID_END, freq="D")
     engine = get_engine()
     with engine.connect() as conn:
@@ -187,7 +206,8 @@ def main():
         global_clean = pd.Series({pd.Timestamp(d): c for d, c in g}, dtype="float64")
 
         frames = []
-        for name, themes in TARGETS.items():
+        for name in sel:
+            themes = TARGETS[name]
             news = daily_news(conn, TARGET_KEYWORDS[name])
             clean = clean_event_days(conn, themes)
             f = build_target_frame(news, clean, global_clean, full_idx)
@@ -209,7 +229,7 @@ def main():
     print(f"\nrows: total={len(df)} train={len(train)} (fit={len(fit)} calib={len(calib)}) test={len(test)}")
     print(f"positives: train={int(train['label'].sum())} test={int(test['label'].sum())}")
 
-    Xf, yf = fit[FEATURES].values, fit["label"].values
+    Xf, yf = fit[FEAT].values, fit["label"].values
     spw = float((yf == 0).sum()) / float(max(1, (yf == 1).sum()))
     model = XGBClassifier(n_estimators=300, max_depth=4, learning_rate=0.05,
                           subsample=0.9, colsample_bytree=0.8, scale_pos_weight=spw,
@@ -218,7 +238,7 @@ def main():
     model.fit(Xf, yf)
 
     # calibrate on the disjoint Jan-2026 slice (Platt if isotonic too sparse)
-    raw_calib = model.predict_proba(calib[FEATURES].values)[:, 1]
+    raw_calib = model.predict_proba(calib[FEAT].values)[:, 1]
     if int(calib["label"].sum()) >= 8:
         cal = IsotonicRegression(out_of_bounds="clip").fit(raw_calib, calib["label"].values)
         cal_kind = "isotonic"
@@ -235,7 +255,7 @@ def main():
     op_thr = float(max(grid, key=lambda t: prf(yc, (p_calib >= t).astype(int))["f1"]))
 
     # ---- evaluate on held-out test (>= 2026-02-01, includes the 2026-03 spike) ----
-    raw_test = model.predict_proba(test[FEATURES].values)[:, 1]
+    raw_test = model.predict_proba(test[FEAT].values)[:, 1]
     p_test = np.clip(calibrate(raw_test), 0, 1)
     y_test = test["label"].values
     pred_op = (p_test >= op_thr).astype(int)
@@ -274,19 +294,20 @@ def main():
     print(f"  (predictor F1 vs persistence F1: {clf_prf['f1']:.0%} vs {base_prf['f1']:.0%})")
 
     # leakage guard: every feature window ends at obs_date (built via rolling, no shift(-) except label)
-    assert "label" not in FEATURES, "label leaked into features"
+    assert "label" not in FEAT, "label leaked into features"
 
     per_target = {t: {"train_pos": int(train[train.target == t]["label"].sum()),
-                      "test_pos": int(test[test.target == t]["label"].sum())} for t in TARGETS}
-    importances = dict(sorted(zip(FEATURES, model.feature_importances_.tolist()),
+                      "test_pos": int(test[test.target == t]["label"].sum())} for t in sel}
+    importances = dict(sorted(zip(FEAT, model.feature_importances_.tolist()),
                               key=lambda kv: kv[1], reverse=True))
 
     os.makedirs("model_training", exist_ok=True)
-    with open(MODEL_OUT, "wb") as f:
-        pickle.dump({"model": model, "calibrator": cal, "cal_kind": cal_kind, "features": FEATURES}, f)
-    df.to_csv(DATASET_OUT, index=False)
+    with open(model_out, "wb") as f:
+        pickle.dump({"model": model, "calibrator": cal, "cal_kind": cal_kind, "features": FEAT}, f)
+    df.to_csv(dataset_out, index=False)
     metrics = {
         "task": "disruption_predictor",
+        "targets": sel, "features": FEAT, "dropped_features": sorted(drop),
         "horizon_days": list(HORIZON), "split_date": SPLIT_DATE,
         "n_total": len(df), "n_train": len(train), "n_test": len(test),
         "test_positives": int(y_test.sum()), "test_base_rate": round(base_rate, 4),
@@ -298,9 +319,9 @@ def main():
         "per_target": per_target,
         "feature_importance": {k: round(v, 4) for k, v in importances.items()},
     }
-    with open(METRICS_OUT, "w") as f:
+    with open(metrics_out, "w") as f:
         json.dump(metrics, f, indent=2)
-    print(f"\nSaved model -> {MODEL_OUT}\nSaved metrics -> {METRICS_OUT}\nSaved dataset -> {DATASET_OUT}")
+    print(f"\nSaved model -> {model_out}\nSaved metrics -> {metrics_out}\nSaved dataset -> {dataset_out}")
 
 
 if __name__ == "__main__":

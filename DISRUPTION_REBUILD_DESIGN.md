@@ -313,3 +313,38 @@ From the RAW news stream (all `events` matching the target's keywords) + the cle
 - **News is contemporaneous, not leading, for sudden events** (quakes/fires) — target near-term
   probability + detection, not multi-week foresight. This is why the predecessor's 14-day
   forecast failed structurally.
+
+---
+
+## 14. Phase-2 build results (measured — branch `disruption-rebuild-v2`)
+
+Scripts: `scripts/build_easy_negatives.py` (T4), `train_relevance_classifier.py` (T5),
+`train_predictor.py` (T7, parametric: `--targets`, `--drop`, `--tag`). Metrics persisted to
+`data/relevance_metrics.json` and `data/predictor_metrics.json` (for the in-UI surface, T9).
+
+- **T4 easy negatives:** 2,500 random non-`CANDIDATE_RE` articles → `easy_negatives` table. 0 match the filter (acceptance pass).
+- **T5 relevance classifier** (TF-IDF + XGBoost, distills the cascade; gold held out):
+  P=77% R=59% **F1=67%** vs keyword baseline F1=59% (**PASS**) and LLM-strict oracle F1=87%.
+  Precision is near-oracle; **recall is the lever** (lower threshold / sentence-transformer embeddings).
+- **T7 predictor** (pooled, calibrated XGBoost; split keeps 2026-03 spike in test):
+  - **Chosen config = pooled, `dow`/`is_weekend` dropped.** Test (n=720, 21% base rate):
+    AUC 0.61, **onset recall 71% (52/73)** at 23% precision; F1 38% vs persistence 54%.
+  - **Headline = onset detection:** persistence (clustering rule) has **0% recall on new-onset
+    disruptions by construction**; the news model catches 71% of them. That is the real "prediction."
+  - Driving features (post-`dow`): `vol_3d/7d/14d` (article-volume momentum), `sent_min_3d/7d`
+    (negative-sentiment spikes), `kw_hits_1d/3d`, `cross_clean_3d`. Clean "predict-from-news" story.
+
+### Phase-2 lessons (hard-won — fold into §13)
+- **`dow` (day-of-week) is a confound — drop it.** As a feature it dominated importance (0.27)
+  by exploiting "disruptions get reported on weekdays." Dropping it lifts onset recall 55%→71%
+  and removes an examiner-bait criticism. News-content features then drive the model.
+- **Do NOT build a shipping-only model under the honest split.** The Gulf/Red Sea crisis
+  escalated *after* 2026-02, so shipping has only **28 train vs 88 test positives** (7%→61%
+  base-rate shift); calibration collapses (Brier 0.42). **Pool the targets** — the others supply
+  training positives across the split, making the pooled model far more robust. (Reverses the
+  §4 "shipping flagship" assumption.)
+- **Brier is NOT a selling point here.** A constant base-rate predictor (~0.166) beats both the
+  model (0.176) and persistence's hard-0/1 (0.190). Lead with **onset recall + AUC**, not Brier.
+- **Persistence is a strong baseline on raw F1** (clustering) — the model cannot win raw F1 and
+  should not claim to. Its value is onset anticipation, calibrated probabilities, and SHAP-able
+  news features.

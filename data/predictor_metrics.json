@@ -1,5 +1,34 @@
 {
   "task": "disruption_predictor",
+  "targets": [
+    "shipping_chokepoints",
+    "semiconductor_electronics",
+    "european_auto",
+    "critical_materials",
+    "us_logistics"
+  ],
+  "features": [
+    "vol_1d",
+    "vol_3d",
+    "vol_7d",
+    "vol_14d",
+    "sent_mean_3d",
+    "sent_mean_7d",
+    "sent_min_3d",
+    "sent_min_7d",
+    "sent_delta_3d",
+    "kw_hits_1d",
+    "kw_hits_3d",
+    "clean_cnt_3d",
+    "clean_cnt_7d",
+    "clean_cnt_14d",
+    "days_since_clean",
+    "cross_clean_3d"
+  ],
+  "dropped_features": [
+    "dow",
+    "is_weekend"
+  ],
   "horizon_days": [
     1,
     3
@@ -11,12 +40,12 @@
   "test_positives": 153,
   "test_base_rate": 0.2125,
   "predictor": {
-    "brier": 0.1706,
-    "auc": 0.6693,
-    "precision": 0.3782,
-    "recall": 0.4771,
-    "f1": 0.422,
-    "operating_threshold": 0.1,
+    "brier": 0.1765,
+    "auc": 0.6148,
+    "precision": 0.2974,
+    "recall": 0.5229,
+    "f1": 0.3791,
+    "operating_threshold": 0.09,
     "calibration": "isotonic"
   },
   "persistence_baseline": {
@@ -29,10 +58,10 @@
   "onset_value_add": {
     "onset_positives": 73,
     "persistence_recall": 0.0,
-    "predictor_recall": 0.5479,
-    "predictor_precision": 0.2632,
-    "caught": 40,
-    "flagged": 152
+    "predictor_recall": 0.7123,
+    "predictor_precision": 0.2261,
+    "caught": 52,
+    "flagged": 230
   },
   "per_target": {
     "shipping_chokepoints": {
@@ -57,23 +86,21 @@
     }
   },
   "feature_importance": {
-    "dow": 0.2674,
-    "kw_hits_1d": 0.0713,
-    "cross_clean_3d": 0.0622,
-    "vol_14d": 0.0559,
-    "vol_3d": 0.0542,
-    "vol_7d": 0.0536,
-    "sent_min_7d": 0.0486,
-    "kw_hits_3d": 0.0483,
-    "days_since_clean": 0.046,
-    "sent_mean_7d": 0.0442,
-    "clean_cnt_14d": 0.0393,
-    "clean_cnt_7d": 0.0375,
-    "sent_mean_3d": 0.037,
-    "sent_delta_3d": 0.0368,
-    "sent_min_3d": 0.0354,
-    "vol_1d": 0.0328,
-    "is_weekend": 0.0204,
-    "clean_cnt_3d": 0.009
+    "vol_3d": 0.1537,
+    "vol_7d": 0.0856,
+    "vol_14d": 0.0765,
+    "sent_min_7d": 0.0699,
+    "kw_hits_1d": 0.0669,
+    "kw_hits_3d": 0.0666,
+    "sent_min_3d": 0.0645,
+    "cross_clean_3d": 0.0615,
+    "days_since_clean": 0.0589,
+    "sent_mean_7d": 0.0573,
+    "clean_cnt_14d": 0.0523,
+    "sent_mean_3d": 0.0495,
+    "sent_delta_3d": 0.0471,
+    "clean_cnt_7d": 0.0459,
+    "vol_1d": 0.042,
+    "clean_cnt_3d": 0.002
   }
 }

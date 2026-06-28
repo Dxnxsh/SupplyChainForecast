@@ -179,7 +179,7 @@ backtest-replay scrubber (leakage-free), SHAP why-panel, prospective tracker.
   - T3 Human gold set — DONE. Full clean-set gold (`data/gold_set_full.csv`, n=150):
     **precision 80%, recall 95%, F1 87%**. This is the trusted evaluation set for the relevance
     classifier.
-- **Phase 2 — Own NLP models (T4/T5 DONE; T6 optional):**
+- **Phase 2 — Own NLP models (T4/T5/T6 DONE):**
   - T4 **(DONE)** Easy negatives — 2,500 random non-`CANDIDATE_RE` articles → `easy_negatives`
     table. `scripts/build_easy_negatives.py`.
   - T5 **(DONE)** Relevance classifier (TF-IDF + XGBoost) — F1 **67%** vs keyword baseline 59%
@@ -188,8 +188,12 @@ backtest-replay scrubber (leakage-free), SHAP why-panel, prospective tracker.
     emb+LogReg **R 59%→89%**, F1 67%→69% (73% tuned); emb+XGBoost 69/75/72 (balanced).
     `scripts/train_relevance_embeddings.py`. New dep: `sentence-transformers`. Recall-first choice
     for a live early-warning filter. **Chosen live relevance model = embeddings.**
-  - T6 **(optional, not built)** Topic model (BERTopic / LDA) over relevance-filtered events →
-    open-vocab themes + emergent-theme discovery; map to the consolidated targets.
+  - T6 **(DONE)** Topic model — BERTopic (MiniLM→UMAP→HDBSCAN→c-TF-IDF) over the 557 clean
+    events. 12 coherent topics, 0 outliers; **11/12 map cleanly to a fixed target** (validates the
+    supervised targets), 1 emergent (manufacturing/production); `recent_90d_share` = drift signal.
+    Acceptance PASS. Shipping-dominated corpus → topics mostly sub-divide shipping (faithful to
+    82% reality). Discovery/scope layer, NOT a predictor feature. `scripts/build_topic_model.py`,
+    summary `data/topic_model_summary.json`, assignments `data/topic_assignments.csv`.
 - **Phase 3 — Predictor + eval + UI:**
   - T7 **(DONE)** (target, day) feature grid from RAW stream + pooled calibrated predictor (no
     severity head). Chosen config: pooled, `dow` dropped. `scripts/train_predictor.py`. See §14.

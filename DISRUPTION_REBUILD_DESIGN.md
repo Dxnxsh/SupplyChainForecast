@@ -387,3 +387,50 @@ disruptions cluster) and NOT Brier (a constant base-rate ~0.166 beats everyone).
 - **Persistence is a strong baseline on raw F1** (clustering) — the model cannot win raw F1 and
   should not claim to. Its value is onset anticipation, calibrated probabilities, and SHAP-able
   news features.
+
+---
+
+## 15. UI & presentation layer (T9)
+
+Fresh frontend — **new Vite + React + TypeScript app in `web/`** (NOT a revival of
+`chain-calm-main`, which was supplier-node-centric). v2 is **target/theme-centric**. Reads model
+outputs; no per-facility prediction in the UI (composition only).
+
+### Views (public-first)
+1. **Global situation map** — world map; 5 targets as geographic markers coloured by status;
+   live disruption events plotted from `events.latitude/longitude` (already geocoded); shipping
+   lane Hormuz→Red Sea→Suez highlights when disrupted. Click marker → sector card.
+2. **Sector status board** — the 5 consolidated targets in plain language: status
+   (calm / watch / active disruption), one-line "what's happening", 3-day outlook
+   (unlikely / possible / likely + low/med/high), and "why now" headlines.
+3. **Product supply chain** — iPhone / AirPods / EV / Laptop as a **weighted composition** of the
+   5 targets (approximate BOM). Exposure = aggregate of target predictions by reliance weight;
+   shows the driver. **Composition, NOT a new model** — must not reach down to per-facility scoring.
+4. **Model accuracy** — technical validation page (secondary, for examiner): relevance P/R/F1 vs
+   baselines, predictor walk-forward AUC, leakage-test badges, discovered topics.
+
+### Plain-language mapping (model → words)
+- `P(disruption next 1-3d)`: `<0.15` unlikely · `0.15–0.35` possible · `>0.35` likely.
+- status pill from current activity (recent clean events + onset flag): calm / watch / active.
+- "why now" = top recent matched headlines per target (from `events`).
+- accuracy phrased plainly ("right ~7 in 10 times on new disruptions"), not "AUC 0.73".
+
+### Design language — "paper terminal" (skin only; layouts stay friendly)
+- **Palette (light, primary):** paper `#EFEDE4`, panel `#F7F5EE`, ink `#20201C`, border `#D7D3C7`;
+  status calm `#2F7D4F`, watch `#B07D29`, alert `#B23A2E`. Colour only encodes status.
+- **Palette (dark CRT variant, toggle):** base `#0E0F0C`, panel `#14160F`, phosphor `#E4E2D8`,
+  border `#2A2E22`; calm `#4FB36A`, watch `#D6A23C`, alert `#E0584B`.
+- **Type:** display/headers + big numbers = dot-matrix **Doto**; body/labels = clean mono
+  **IBM Plex Mono** (or JetBrains Mono); labels UPPERCASE, letter-spacing ~0.14em.
+- **Treatment:** hairline-bordered panels, tick-mark + dotted-leader panel headers, LED status
+  dots, prominent numeric readouts. Instrument-grade but legible.
+- **Toggles:** light↔dark (CRT), and optional lite↔pro density. Implement palette as CSS tokens.
+
+### Data + rewind
+- All views computed **for a given date** (default = latest). Backend `as_of` pattern → the
+  **rewind-to-past-date** feature (later) drops in without a rebuild.
+- Bridge: `scripts/build_ui_snapshot.py` writes `data/ui_snapshot.json` (per-target current status,
+  P(next 3d), recent headlines, map points) by running `model_training/predictor.pkl` on the latest
+  features. UI reads the snapshot + the metric JSONs; a small FastAPI read layer can serve them later.
+- **Live "current" status depends on live ingestion (T10).** Until then the board reflects the
+  latest available data date — state this in the UI.

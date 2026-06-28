@@ -2,6 +2,7 @@ import { Routes, Route } from "react-router-dom";
 import TopBar from "./components/TopBar";
 import MapView from "./pages/MapView";
 import Dashboard from "./pages/Dashboard";
+import Accuracy from "./pages/Accuracy";
 import Placeholder from "./pages/Placeholder";
 
 export default function App() {
@@ -20,15 +21,7 @@ export default function App() {
             />
           }
         />
-        <Route
-          path="/accuracy"
-          element={
-            <Placeholder
-              title="Model accuracy"
-              blurb="Relevance precision/recall vs baselines, predictor walk-forward AUC, leakage-test badges, and the discovered topics — the technical evidence, read from the metric files."
-            />
-          }
-        />
+        <Route path="/accuracy" element={<Accuracy />} />
       </Routes>
     </div>
   );

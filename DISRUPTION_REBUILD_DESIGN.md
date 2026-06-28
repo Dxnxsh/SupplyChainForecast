@@ -199,9 +199,10 @@ backtest-replay scrubber (leakage-free), SHAP why-panel, prospective tracker.
     severity head). Chosen config: pooled, `dow` dropped. `scripts/train_predictor.py`. See §14.
   - T8 **(DONE)** Leakage + walk-forward tests — truncation-invariance max diff 0.0 (no leak),
     calib disjoint, **walk-forward mean AUC 0.733** (90% folds >0.55). `scripts/test_predictor.py`.
-  - T9 **(NEXT)** In-UI metrics surface — read `data/relevance_metrics.json`,
-    `data/predictor_metrics.json`, `data/predictor_test_report.json` into the dashboard.
-  - T10 Live ingestion (RSS + Perigon recent window) → relevance classifier → topic model (no LLM).
+  - T9 **(DONE)** Fresh `web/` app — 4 views (Map landing, Sectors, Products, Accuracy), paper-terminal
+    skin, `build_ui_snapshot.py` bridge. In-UI metrics surfaced on the Accuracy page.
+  - T10 **(SPEC'd — see §16)** Live ingestion (RSS + Perigon recent window) → embeddings relevance
+    classifier + embedding theme-router → `events`/`disruption_candidates` (no LLM in the loop).
 - **Phase 4 — Stretch:** T11 scheduled-event lead-time extraction.
 
 **Model-improvement menu (results):**
@@ -434,3 +435,140 @@ outputs; no per-facility prediction in the UI (composition only).
   features. UI reads the snapshot + the metric JSONs; a small FastAPI read layer can serve them later.
 - **Live "current" status depends on live ingestion (T10).** Until then the board reflects the
   latest available data date — state this in the UI.
+
+## 16. Live ingestion (T10) — LLM-free build spec
+
+**Goal:** keep `events` and `disruption_candidates` fresh from live news so the snapshot (and UI)
+advances day-to-day, **with no generative LLM in the loop**. The one-time Gemini cascade that
+labeled the 180k corpus is replaced live by the **embeddings relevance classifier** (T5/Improvement B)
++ an **embedding theme-router**. The predictor (`predictor.pkl`) is **fixed** — no retraining in T10;
+features are recomputed live by the existing `build_target_frame`.
+
+### 16.1 Data contract (what the live loop MUST produce)
+The predictor + snapshot read exactly two tables. Live writes must satisfy both:
+
+- **`events`** (raw corpus, 180,939 rows, PK `id`, dedup key `article_url`). Live insert must populate:
+  `article_url`, `article_source`, `article_title`, `article_timestamp` (timestamp), `event_text_segment`
+  (body/summary), `sentiment_score` (DOUBLE), `sentiment_label`, and best-effort `latitude`/`longitude`.
+  Consumed by `daily_news()` (per-day count + `AVG/MIN(sentiment_score)` over a keyword-regex slice) and
+  `map_points()` (lat/lon dots). **`sentiment_score` must be on the same scale/sign as the existing
+  corpus** — verify the historical convention first (FinBERT signed −1..1) and match it, or the
+  `sent_mean/min` features shift under the model. This is a correctness gate, not a nicety.
+- **`disruption_candidates`** (clean-event layer, PK `article_title`). A clean event =
+  `is_risk_event AND strict_is_risk`. Live insert for a **relevant** article sets **both true in one
+  shot** (the embeddings classifier was trained positive = `is_risk_event AND strict_is_risk` (557),
+  negative = `is_risk_event AND NOT strict_is_risk` (1082) — it already collapses the two LLM stages):
+  `article_title` (PK), `article_id`, `article_url`, `article_date` (= `article_timestamp::date`),
+  `is_risk_event=true`, `strict_is_risk=true`, `themes` (JSONB, ≥1 name from the 12-name `THEMES`),
+  `risk_type` (router label), `confidence` (classifier P), `reason` ("emb-relevance ≥ thr"),
+  `model`/`strict_model` = `"emb-minilm-logreg"`. Consumed by `clean_event_days()` (filters by
+  `themes` ∈ target's theme list). **Non-relevant articles are NOT written here** — they only land in
+  `events`, and url-dedup stops re-fetch, so no "seen" marker is needed.
+
+### 16.2 Pipeline (LLM-free)
+```
+RSS feeds (primary, live) + Perigon recent window (supplement, last 24–72h)
+  → dedup by article_url against events          (skip rows already present)
+  → parse: title, body, source, timestamp, url
+  → sentiment: FinBERT (match corpus scale) → sentiment_score, sentiment_label
+  → geocode (best-effort, non-blocking): GLiNER2 NER → geocode cache → lat/lon
+  → INSERT events (ON CONFLICT (article_url) DO NOTHING)
+  → relevance: MiniLM encode title+body ONCE; emb classifier P(disruption)
+       P ≥ thr ?  ── yes ─→ theme-router (reuse same MiniLM vector):
+       │                      cosine to per-theme prototypes; take themes ≥ τ (top-k, k≤2);
+       │                      fallback to per-theme keyword regex if none clear τ
+       │                    → INSERT disruption_candidates (is_risk_event=t, strict_is_risk=t, themes=…)
+       └────────── no ──→  (already in events; nothing more)
+  → build_ui_snapshot --as-of <today>   (predictor.pkl is fixed; features recomputed live)
+```
+No call to `src.gemini_client` / OpenRouter / OpenModel anywhere on this path — assert it in a test.
+
+### 16.3 Components to build
+1. **`scripts/build_theme_prototypes.py`** (one-time, re-runnable). Encode the 557 clean events
+   (`is_risk_event AND strict_is_risk`) with `all-MiniLM-L6-v2` (normalized), average per theme →
+   `model_training/theme_prototypes.pkl` = `{encoder_name, themes:[…], protos: np.ndarray[12×384]}`.
+   This is the LLM-free theme assigner; prototypes come from the already-labeled positives.
+2. **`scripts/live_label.py`** (shared labeler, importable). Loads `relevance_classifier_emb.pkl`
+   + `theme_prototypes.pkl`; one MiniLM encoder instance. `label_batch(texts) -> [{relevant, P,
+   themes, top_theme, sim}]`. Threshold from `data/relevance_metrics_embeddings.json` (use the
+   recall-favoring operating point ≈0.5; document the exact value). τ for theme cosine ≈0.30
+   (tune on the 557; pick so ≥95% of known positives route to their gold theme).
+3. **`scripts/ingest_live.py`** (slim runner — fresh, NOT legacy `rss_ingest.py`). Reuses only:
+   `feedparser` parse helpers (`_strip_html`, `_entry_timestamp`), `src.sentiment_finbert`,
+   optionally `src.preprocessing`(GLiNER2)+`src.geocoding`, `src.db_config`. Drops all legacy
+   heavyweight heads (tri-class `classifier.pkl`, disruption/impact XGB, node-match, temporal,
+   forecast_snapshots). Flags: `--interval N` (poll loop), `--skip-db` (dry-run print),
+   `--source rss|perigon|both`, `--limit`, `--no-geocode`. Ends each cycle by invoking
+   `scripts.build_ui_snapshot` with `--as-of` = max(`article_timestamp`)::date.
+4. **`config/rss_feeds.json`** — copy from `legacy/config/rss_feeds.json` (JSON array of
+   `{url, source}`). Curated supply-chain + general-news feeds.
+5. **Perigon** — reuse `legacy/src/perigon_ingest.py` fetch (`fetch_*`, budget ledger, seen-url
+   cache) but route raw articles through the slim insert+label path, NOT its legacy event builder.
+   Perigon reaches ~3 months back, 150 req/month — use as a recent-window supplement only.
+6. **`web/src/pages/Feed.tsx`** — new 5th view **"Live feed / Evidence"** (route `/feed`, add to
+   `TopBar`). The transparency page that proves the model isn't a black box: a reverse-chronological
+   table of recently ingested articles, each row = `time · source · headline · relevance P
+   (≥thr ✓/✗) · routed theme · sentiment · which sector it feeds`. Click a row → the feature deltas
+   it contributed to that sector's current score (e.g. "bumped `kw_hits_3d` +1, `clean_cnt_3d` +1 →
+   sector P 0.21 → 0.27"). Reads a new `feed[]` block in the snapshot (no new endpoint). Relevant
+   articles get a calm/positive accent; scored-but-rejected articles (P<thr) are shown muted, so the
+   examiner sees the classifier's discriminating decisions, not just the hits.
+
+### Influence of live ingestion on each page (confirmation)
+- **Map / Sectors / Products → live.** Map & Sectors read per-target status/P/headlines/event-dots
+  straight from the snapshot; Products is a client-side composition of the sector P values, so it
+  moves whenever sectors move. A freshly-ingested clean event flows through `clean_event_days` →
+  features → predictor → snapshot → all three.
+- **Feed → live (most directly).** It *is* the live article stream with per-article evidence.
+- **Accuracy → static by design.** Validation metrics (walk-forward AUC, relevance F1/recall,
+  leakage badges, topics) are frozen held-out evaluation; the predictor is **fixed** in T10 (no
+  retrain in the loop), so live news changes *today's prediction*, not *measured model quality*. The
+  only live-moving figure there is the dataset-size counter (clean-events / event-days / articles)
+  if wired to live `COUNT`s — a tally, not a quality metric. Reported AUC/F1 only change under a
+  future retrain task (§16.7). State this on the page so the freeze reads as intentional rigor.
+
+### 16.4 `build_ui_snapshot` change
+`GRID_END` (2026-06-27) is the predictor's training cutoff; the snapshot's `--as-of` is independent
+(features run `LOOKBACK_START..as_of`). Change the snapshot default from the hardcoded `GRID_END` to
+`max(article_timestamp)::date` from the DB (fall back to `GRID_END`), so live data drives "current"
+without a flag. Keep `--as-of` for rewind. Update the snapshot's `data_note` + the hardcoded
+`summary` counts (557/122/180939) to live `SELECT COUNT`s.
+
+**Emit a `feed[]` block for the Evidence page.** Add, per recent article (last ~14d, cap ~120, both
+relevant and a sample of scored-but-rejected): `{ts, source, title, url, relevance_p, relevant
+(bool), theme, sentiment_score, sector_key}`. For relevant rows also attach `contributes`: the
+feature(s) it incremented for its sector (`kw_hits_3d`, `clean_cnt_3d`, `vol_3d`, sentiment) plus the
+sector's current `p` — enough to render the before/after deltas. `relevance_p`/`theme` come from the
+live labeler at ingest time; **persist them** so the snapshot can read them back rather than
+re-encoding (store `relevance_p` in `disruption_candidates.confidence` (already there) and the routed
+theme in `themes`; for rejected rows, either a lightweight `article_scores(article_url, p, ts)` table
+or recompute on the fly in the snapshot for the recent window). Keep the encode-once discipline:
+the labeler already has the vector at ingest — write it through, don't recompute in the UI bridge.
+
+### 16.5 Scheduling
+Dev: `venv311/bin/python -m scripts.ingest_live --interval 1800`. Prod: launchd (macOS) /cron every
+20–30 min calling one cycle. One cycle = fetch → label → insert → rebuild snapshot. Idempotent, so
+overlap is harmless.
+
+### 16.6 Acceptance criteria (T10)
+- **Dry-run:** `--skip-db` fetches RSS, scores, prints N relevant/total with themes; writes nothing.
+- **Insert correctness:** new `events` rows appear; relevant → `disruption_candidates` with
+  `is_risk_event=strict_is_risk=true`, `themes ⊆ THEMES` (12 names), `article_date` set.
+- **Dedup:** re-running the same cycle inserts **0** new rows (url + title conflicts no-op).
+- **Theme routing sanity:** a Red-Sea/Hormuz headline routes to a shipping theme; a TSMC headline to
+  a semiconductor theme (assert on a small fixture set).
+- **Snapshot advances:** after a cycle, `ui_snapshot.json` `as_of` = new max date; sectors recompute;
+  a freshly-inserted clean event moves its sector toward watch/active.
+- **No-LLM guarantee:** `ingest_live` + `live_label` import-graph contains no `gemini_client`,
+  `openrouter_client`, `openmodel_client` (grep-assert in a test).
+- **Sentiment scale:** live `sentiment_score` distribution matches the historical corpus
+  (same sign/range) — spot-check 10 rows.
+- **Evidence page round-trip:** an article in `feed[]` shows its `relevance_p`, routed `theme`, and
+  sentiment; clicking a relevant row shows the feature delta(s) it added and the sector's current `p`.
+  The same article's contribution is traceable from feed → sector card → map marker (one event, three
+  consistent views).
+
+### 16.7 Out of scope for T10 (later)
+Predictor retraining on live-grown positives (T-future "D: more labels"); scheduled-event lead-time
+extraction (T11); a FastAPI read layer replacing the static snapshot JSON; backfilling geocode for
+historical rows. T10 is ingestion + live labeling only.

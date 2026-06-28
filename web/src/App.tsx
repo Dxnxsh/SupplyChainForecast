@@ -3,7 +3,7 @@ import TopBar from "./components/TopBar";
 import MapView from "./pages/MapView";
 import Dashboard from "./pages/Dashboard";
 import Accuracy from "./pages/Accuracy";
-import Placeholder from "./pages/Placeholder";
+import Products from "./pages/Products";
 
 export default function App() {
   return (
@@ -12,15 +12,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<MapView />} />
         <Route path="/sectors" element={<Dashboard />} />
-        <Route
-          path="/products"
-          element={
-            <Placeholder
-              title="Product supply chain"
-              blurb="iPhone / AirPods / EV / laptop exposure, composed from the sector predictions via an approximate bill of materials. Aggregates the working forecasts — it does not predict products directly."
-            />
-          }
-        />
+        <Route path="/products" element={<Products />} />
         <Route path="/accuracy" element={<Accuracy />} />
       </Routes>
     </div>

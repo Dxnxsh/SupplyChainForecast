@@ -79,3 +79,6 @@ docs/
 
 # Archived prior project (v1) — tracked files kept; ignore stray artifacts carried in by the move
 legacy/
+
+# BERTopic saved model (regenerable binary)
+model_training/bertopic_model/

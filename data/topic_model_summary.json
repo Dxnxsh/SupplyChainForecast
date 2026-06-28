@@ -1,0 +1,275 @@
+{
+  "task": "topic_model",
+  "encoder": "sentence-transformers/all-MiniLM-L6-v2",
+  "n_docs": 557,
+  "n_topics": 12,
+  "n_outliers": 0,
+  "n_topics_mapping_to_target": 11,
+  "n_emergent": 1,
+  "acceptance_pass": true,
+  "topics": [
+    {
+      "topic": 0,
+      "size": 166,
+      "keywords": [
+        "blockade",
+        "trump",
+        "iran",
+        "hormuz",
+        "strait",
+        "strait hormuz"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.952,
+      "target_distribution": {
+        "shipping_chokepoints": 158,
+        "us_logistics": 2,
+        "semiconductor_electronics": 3,
+        "critical_materials": 2,
+        "european_auto": 1
+      },
+      "recent_90d_share": 0.873,
+      "example": "China's economy grew 5 percent in Q1 despite the Middle East war - Pravda EN",
+      "emergent": false
+    },
+    {
+      "topic": 1,
+      "size": 109,
+      "keywords": [
+        "oil",
+        "brent",
+        "barrel",
+        "crude",
+        "prices",
+        "oil prices"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.991,
+      "target_distribution": {
+        "shipping_chokepoints": 108,
+        "semiconductor_electronics": 1
+      },
+      "recent_90d_share": 0.697,
+      "example": "Brent Crude Prices Surge Amid Iran War and U.S. Blockade",
+      "emergent": false
+    },
+    {
+      "topic": 2,
+      "size": 60,
+      "keywords": [
+        "iran",
+        "war",
+        "israel",
+        "attacks",
+        "gas",
+        "qatar"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.783,
+      "target_distribution": {
+        "shipping_chokepoints": 47,
+        "us_logistics": 2,
+        "european_auto": 9,
+        "critical_materials": 1,
+        "semiconductor_electronics": 1
+      },
+      "recent_90d_share": 0.2,
+      "example": "\u2018Unprecedented\u2019: Israel, US carry out extensive strikes across Iran",
+      "emergent": false
+    },
+    {
+      "topic": 3,
+      "size": 38,
+      "keywords": [
+        "production",
+        "china",
+        "growth",
+        "chinas",
+        "uk",
+        "sales"
+      ],
+      "dominant_target": "european_auto",
+      "dominant_share": 0.474,
+      "target_distribution": {
+        "semiconductor_electronics": 10,
+        "critical_materials": 10,
+        "european_auto": 18
+      },
+      "recent_90d_share": 0.026,
+      "example": "'China Inside': How Chinese EV tech is reshaping global auto design",
+      "emergent": true
+    },
+    {
+      "topic": 4,
+      "size": 52,
+      "keywords": [
+        "war",
+        "energy",
+        "fuel",
+        "iran",
+        "global",
+        "prices"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.942,
+      "target_distribution": {
+        "shipping_chokepoints": 49,
+        "semiconductor_electronics": 1,
+        "critical_materials": 1,
+        "european_auto": 1
+      },
+      "recent_90d_share": 0.327,
+      "example": "Asia Wrap: Black Gold Rattles Markets as Oil Clears $100",
+      "emergent": false
+    },
+    {
+      "topic": 5,
+      "size": 27,
+      "keywords": [
+        "asian",
+        "shares",
+        "ai",
+        "stocks",
+        "chip",
+        "market"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.519,
+      "target_distribution": {
+        "semiconductor_electronics": 11,
+        "shipping_chokepoints": 14,
+        "european_auto": 2
+      },
+      "recent_90d_share": 0.63,
+      "example": "AI boom causing global memory crisis, warn Dell, HP and Lenovo",
+      "emergent": false
+    },
+    {
+      "topic": 6,
+      "size": 23,
+      "keywords": [
+        "flights",
+        "airlines",
+        "fuel",
+        "jet",
+        "flight",
+        "air"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.826,
+      "target_distribution": {
+        "shipping_chokepoints": 19,
+        "us_logistics": 3,
+        "european_auto": 1
+      },
+      "recent_90d_share": 0.261,
+      "example": "Iranian plane makes mysterious landing in Oman. Will Trump give Tehran one last chance?- T",
+      "emergent": false
+    },
+    {
+      "topic": 7,
+      "size": 15,
+      "keywords": [
+        "japan",
+        "russia",
+        "people",
+        "waves",
+        "killed",
+        "heavy"
+      ],
+      "dominant_target": "semiconductor_electronics",
+      "dominant_share": 0.733,
+      "target_distribution": {
+        "semiconductor_electronics": 11,
+        "critical_materials": 3,
+        "shipping_chokepoints": 1
+      },
+      "recent_90d_share": 0.133,
+      "example": "8.8 quake hits Russia, Japan, Hawaii coasts",
+      "emergent": false
+    },
+    {
+      "topic": 8,
+      "size": 23,
+      "keywords": [
+        "hormuz",
+        "oil",
+        "strait",
+        "strait hormuz",
+        "prices",
+        "iran"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.913,
+      "target_distribution": {
+        "shipping_chokepoints": 21,
+        "us_logistics": 2
+      },
+      "recent_90d_share": 0.696,
+      "example": "Buy US Oil Or Secure Hormuz Yourself\": Donald Trump's Message To Nations Facing Fuel Short",
+      "emergent": false
+    },
+    {
+      "topic": 9,
+      "size": 14,
+      "keywords": [
+        "port",
+        "tanker",
+        "oil",
+        "gulf",
+        "oman",
+        "operations"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 1.0,
+      "target_distribution": {
+        "shipping_chokepoints": 14
+      },
+      "recent_90d_share": 0.143,
+      "example": "LIVE: Saudi Arabia FORCES UAE To SURRENDER, UAE Forces Leave Yemen After Mukalla Port Stri",
+      "emergent": false
+    },
+    {
+      "topic": 10,
+      "size": 17,
+      "keywords": [
+        "points",
+        "oil",
+        "dollar",
+        "crude oil",
+        "100",
+        "crude"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.941,
+      "target_distribution": {
+        "shipping_chokepoints": 16,
+        "european_auto": 1
+      },
+      "recent_90d_share": 0.706,
+      "example": "Saudi assurance on oil shipments lifts PSX",
+      "emergent": false
+    },
+    {
+      "topic": 11,
+      "size": 13,
+      "keywords": [
+        "gold",
+        "dollar",
+        "ceasefire",
+        "april",
+        "prices",
+        "thursday"
+      ],
+      "dominant_target": "shipping_chokepoints",
+      "dominant_share": 0.923,
+      "target_distribution": {
+        "shipping_chokepoints": 12,
+        "critical_materials": 1
+      },
+      "recent_90d_share": 0.846,
+      "example": "Copper Extends Gains on Mideast Optimism | Hellenic Shipping News Worldwide",
+      "emergent": false
+    }
+  ]
+}

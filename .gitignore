@@ -76,3 +76,6 @@ docs/
 !docs/superpowers/specs/
 .gstack/
 .superpowers/
+
+# Archived prior project (v1) — tracked files kept; ignore stray artifacts carried in by the move
+legacy/

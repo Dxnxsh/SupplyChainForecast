@@ -597,3 +597,33 @@ historical rows. T10 is ingestion + live labeling only.
   routing; never re-encode in `build_ui_snapshot` — read `relevance_p`/`theme` back from the DB.
 - **Dependencies & sentiment scale are already resolved** (§16.1) — no installs, call
   `analyze_finbert`. The only numbers Sonnet must *tune* are τ (theme cosine) on the 557.
+
+### 16.9 Ordered build sequence (each step self-contained; ship behind its gate)
+Each step is independently runnable and verifiable. Do them in order; do not start the next until
+the gate passes. Commit per step.
+
+- **T10.1 — Theme prototypes.** Build `scripts/build_theme_prototypes.py` →
+  `model_training/theme_prototypes.pkl` (MiniLM mean per theme over the 557 clean events).
+  **Gate:** pickle has 12 prototypes (384-dim, normalized); a quick self-cosine of each theme's own
+  members averages > other themes (sanity that prototypes separate).
+- **T10.2 — Shared labeler.** Build `scripts/live_label.py` (`label_batch`), thr=0.59, τ tuned here.
+  **Gate:** on a held-back slice of the 557, ≥95% of positives route to their gold theme; on a fixture
+  of 5 hand-written headlines (Red Sea, TSMC, lithium ban, EU auto strike, LA port congestion) each
+  routes to the right theme and clears 0.59.
+- **T10.3 — Slim ingest, dry-run.** Build `scripts/ingest_live.py` with `--skip-db` (+ `--no-geocode`,
+  `--limit`). Fetch the 15 feeds, sentiment, label, print `N relevant / M fetched` with theme + P.
+  **Gate:** runs end-to-end, no LLM imports (grep-assert), writes nothing, prints sane rows.
+- **T10.4 — DB writes + dedup.** Wire the inserts (`events` ON CONFLICT url; `disruption_candidates`
+  ON CONFLICT title; `is_risk_event=strict_is_risk=true`; `sentiment_score∈[−1,1]`).
+  **Gate:** first run inserts >0; immediate re-run inserts **0**; spot-check 10 rows for sentiment
+  sign + `themes ⊆ THEMES`.
+- **T10.5 — Snapshot live-date + `feed[]`.** Update `build_ui_snapshot` to default `as_of =
+  max(article_timestamp)`, live `summary` counts, and emit the `feed[]` block (§16.4).
+  **Gate:** after one ingest cycle, `ui_snapshot.json` `as_of` advances; Map/Sectors/Products reflect
+  the new sector P; `feed[]` is populated with `relevance_p`/`theme`/`sentiment`.
+- **T10.6 — Evidence page + scheduling.** Build `web/src/pages/Feed.tsx` (route `/feed`, TopBar tab),
+  add the `--interval` poll loop (+ optional launchd/cron).
+  **Gate:** the §16.6 Evidence round-trip passes (one event traceable feed → sector → map); a single
+  `--interval` cycle runs unattended and refreshes the snapshot.
+
+Perigon (§16.3 #5) is post-T10.6 and optional — only if RSS volume proves thin.

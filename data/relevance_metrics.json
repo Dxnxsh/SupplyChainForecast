@@ -1,0 +1,26 @@
+{
+  "task": "relevance_classifier",
+  "n_train": 7000,
+  "n_train_pos": 488,
+  "gold_n": 150,
+  "threshold": 0.5,
+  "classifier": {
+    "precision": 0.7708,
+    "recall": 0.5873,
+    "f1": 0.6667,
+    "accuracy": 0.7533
+  },
+  "keyword_baseline": {
+    "precision": 0.42,
+    "recall": 1.0,
+    "f1": 0.5915,
+    "accuracy": 0.42
+  },
+  "llm_strict_ref": {
+    "precision": 0.8,
+    "recall": 0.9524,
+    "f1": 0.8696,
+    "accuracy": 0.88
+  },
+  "beats_keyword_baseline": true
+}

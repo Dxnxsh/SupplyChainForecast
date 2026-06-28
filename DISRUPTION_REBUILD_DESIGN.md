@@ -183,7 +183,11 @@ backtest-replay scrubber (leakage-free), SHAP why-panel, prospective tracker.
   - T4 **(DONE)** Easy negatives — 2,500 random non-`CANDIDATE_RE` articles → `easy_negatives`
     table. `scripts/build_easy_negatives.py`.
   - T5 **(DONE)** Relevance classifier (TF-IDF + XGBoost) — F1 **67%** vs keyword baseline 59%
-    (PASS), oracle 87%. Recall (59%) is the weak link. `scripts/train_relevance_classifier.py`.
+    (PASS), oracle 87%. Recall (59%) was the weak link. `scripts/train_relevance_classifier.py`.
+  - T5+ **(DONE, improvement B)** Sentence-transformer (all-MiniLM-L6-v2) variant fixes recall:
+    emb+LogReg **R 59%→89%**, F1 67%→69% (73% tuned); emb+XGBoost 69/75/72 (balanced).
+    `scripts/train_relevance_embeddings.py`. New dep: `sentence-transformers`. Recall-first choice
+    for a live early-warning filter. **Chosen live relevance model = embeddings.**
   - T6 **(optional, not built)** Topic model (BERTopic / LDA) over relevance-filtered events →
     open-vocab themes + emergent-theme discovery; map to the consolidated targets.
 - **Phase 3 — Predictor + eval + UI:**
@@ -196,11 +200,11 @@ backtest-replay scrubber (leakage-free), SHAP why-panel, prospective tracker.
   - T10 Live ingestion (RSS + Perigon recent window) → relevance classifier → topic model (no LLM).
 - **Phase 4 — Stretch:** T11 scheduled-event lead-time extraction.
 
-**Model-improvement menu (decide before/after T9 — testing showed the model is already
-defensible, so these are polish, not rescue):** (B) lift T5 relevance recall with
-sentence-transformer embeddings — the genuine weak link; (C) add embedding features to T7
-(marginal, walk-forward already 0.73); (D) extend the cascade for more labeled positives
-(only 122 event-days — highest lever, but more Gemini cost). Recommended order if pursued: B → D.
+**Model-improvement menu:** (B) **DONE** — sentence-transformer relevance classifier, recall
+59%→89% (see T5+). Remaining: (C) add embedding features to T7 (marginal, walk-forward already
+0.73); (D) extend the cascade for more labeled positives (only 122 event-days — highest remaining
+lever for the *predictor*, but more Gemini cost). The predictor (T7) is unchanged by B — B improves
+the live relevance filter, not the offline predictor; D is the predictor's lever.
 
 ### Build artifacts already in the repo (handoff state)
 - `src/gemini_client.py` — Agent Platform / Gemini client (express api_key OR ADC; JSON mode).

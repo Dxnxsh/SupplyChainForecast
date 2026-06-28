@@ -1,0 +1,120 @@
+{
+  "checks": {
+    "feature_truncation_invariance": {
+      "pass": true,
+      "rows_checked": 15,
+      "max_abs_diff_full_vs_truncated": 0.0,
+      "note": "features identical whether or not future data exists -> no leakage"
+    },
+    "calib_disjoint_from_test": {
+      "pass": true,
+      "calib_window": [
+        "2026-01-01",
+        "2026-02-01"
+      ],
+      "test_from": "2026-02-01"
+    },
+    "walk_forward": {
+      "n_folds": 10,
+      "mean_auc": 0.733,
+      "share_folds_auc_gt_0.55": 0.9,
+      "folds": [
+        {
+          "origin": "2025-08",
+          "train_pos": 76,
+          "test_n": 155,
+          "test_pos": 11,
+          "auc": 0.564,
+          "onset_recall@q75": 0.273,
+          "persistence_f1": 0.0
+        },
+        {
+          "origin": "2025-09",
+          "train_pos": 87,
+          "test_n": 150,
+          "test_pos": 24,
+          "auc": 0.822,
+          "onset_recall@q75": 0.636,
+          "persistence_f1": 0.08
+        },
+        {
+          "origin": "2025-10",
+          "train_pos": 111,
+          "test_n": 155,
+          "test_pos": 22,
+          "auc": 0.672,
+          "onset_recall@q75": 0.381,
+          "persistence_f1": 0.045
+        },
+        {
+          "origin": "2025-11",
+          "train_pos": 133,
+          "test_n": 150,
+          "test_pos": 9,
+          "auc": 0.883,
+          "onset_recall@q75": 0.889,
+          "persistence_f1": 0.0
+        },
+        {
+          "origin": "2025-12",
+          "train_pos": 142,
+          "test_n": 155,
+          "test_pos": 15,
+          "auc": 0.76,
+          "onset_recall@q75": 0.6,
+          "persistence_f1": 0.0
+        },
+        {
+          "origin": "2026-01",
+          "train_pos": 157,
+          "test_n": 155,
+          "test_pos": 26,
+          "auc": 0.675,
+          "onset_recall@q75": 0.391,
+          "persistence_f1": 0.098
+        },
+        {
+          "origin": "2026-02",
+          "train_pos": 183,
+          "test_n": 140,
+          "test_pos": 14,
+          "auc": 0.702,
+          "onset_recall@q75": 0.643,
+          "persistence_f1": 0.0
+        },
+        {
+          "origin": "2026-03",
+          "train_pos": 197,
+          "test_n": 155,
+          "test_pos": 51,
+          "auc": 0.513,
+          "onset_recall@q75": 0.583,
+          "persistence_f1": 0.535
+        },
+        {
+          "origin": "2026-04",
+          "train_pos": 248,
+          "test_n": 150,
+          "test_pos": 44,
+          "auc": 0.954,
+          "onset_recall@q75": 0.312,
+          "persistence_f1": 0.636
+        },
+        {
+          "origin": "2026-05",
+          "train_pos": 292,
+          "test_n": 155,
+          "test_pos": 25,
+          "auc": 0.786,
+          "onset_recall@q75": 0.111,
+          "persistence_f1": 0.64
+        }
+      ]
+    }
+  },
+  "summary": {
+    "leakage_tests_pass": true,
+    "walk_forward_mean_auc": 0.733,
+    "verdict": "signal is consistent across time"
+  }
+}

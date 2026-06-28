@@ -200,11 +200,16 @@ backtest-replay scrubber (leakage-free), SHAP why-panel, prospective tracker.
   - T10 Live ingestion (RSS + Perigon recent window) → relevance classifier → topic model (no LLM).
 - **Phase 4 — Stretch:** T11 scheduled-event lead-time extraction.
 
-**Model-improvement menu:** (B) **DONE** — sentence-transformer relevance classifier, recall
-59%→89% (see T5+). Remaining: (C) add embedding features to T7 (marginal, walk-forward already
-0.73); (D) extend the cascade for more labeled positives (only 122 event-days — highest remaining
-lever for the *predictor*, but more Gemini cost). The predictor (T7) is unchanged by B — B improves
-the live relevance filter, not the offline predictor; D is the predictor's lever.
+**Model-improvement menu (results):**
+- (B) **DONE, big win** — sentence-transformer relevance classifier, recall 59%→89% (see T5+).
+- (C) **DONE, null result** — semantic embedding feature for the predictor does NOT help
+  (walk-forward AUC 0.733→0.716; single split 0.645→0.597). `scripts/train_predictor_embed.py`,
+  report `data/predictor_embed_report.json`. **Why:** relevance is text-classification (semantics =
+  signal) but the predictor is time-series (signal = volume/recency/sentiment dynamics, not
+  recent-article semantics). Canonical predictor unchanged.
+- (D) **not done** — extend the cascade for more labeled positives. Only 122 event-days; C proved
+  the bottleneck is **data quantity, not features**, so D is the predictor's only real lever — but
+  it costs Gemini calls. Decide vs shipping the (already walk-forward-defensible) model to T9.
 
 ### Build artifacts already in the repo (handoff state)
 - `src/gemini_client.py` — Agent Platform / Gemini client (express api_key OR ADC; JSON mode).

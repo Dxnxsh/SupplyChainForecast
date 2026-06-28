@@ -18,7 +18,24 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
+from tqdm import tqdm
 from xgboost import XGBClassifier, XGBRegressor
+from xgboost.callback import TrainingCallback
+
+
+class TqdmProgressCallback(TrainingCallback):
+    """XGBoost callback that drives a tqdm bar — one tick per boosting round."""
+
+    def __init__(self, total: int, label: str):
+        self._bar = tqdm(total=total, desc=label, unit="tree", dynamic_ncols=True)
+
+    def after_iteration(self, model, epoch, evals_log):
+        self._bar.update(1)
+        return False  # False = keep training
+
+    def after_training(self, model):
+        self._bar.close()
+        return model
 
 _TRAIN_DIR = Path(__file__).resolve().parent
 if str(_TRAIN_DIR) not in sys.path:
@@ -220,6 +237,11 @@ def main():
     else:
         df = load_labeled_frames(csv_paths)
 
+    import time
+    def _step(msg: str) -> float:
+        print(f"\n[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+        return time.time()
+
     df = prepare_df(df)
     if len(df) < 40:
         raise ValueError("Not enough labeled rows for reliable training.")
@@ -237,8 +259,11 @@ def main():
         random_state=args.random_state,
         stratify=stratify_labels,
     )
+    print(f"  train={len(train_df)}  test={len(test_df)}", flush=True)
 
+    _step("Step 1/4  Building TF-IDF + OHE features...")
     X_train, shared_artifacts = fit_shared_features(train_df)
+    print(f"  feature matrix: {X_train.shape}", flush=True)
     X_test = transform_shared_features(test_df, shared_artifacts)
 
     y_train_cls = train_df["manual_is_disruption"].values
@@ -248,6 +273,7 @@ def main():
     neg = max(1, int((y_train_cls == 0).sum()))
     scale_pos_weight = float(neg) / float(pos)
 
+    _step("Step 2/4  Training disruption classifier (XGBoost, 200 trees)...")
     cls = XGBClassifier(
         n_estimators=200,
         max_depth=6,
@@ -258,6 +284,8 @@ def main():
         random_state=args.random_state,
         n_jobs=-1,
         eval_metric="logloss",
+        verbosity=0,
+        callbacks=[TqdmProgressCallback(200, "Classifier")],
     )
     cls.fit(X_train, y_train_cls)
     cls_pred = cls.predict(X_test)
@@ -274,11 +302,13 @@ def main():
     y_train_reg = train_df["manual_impact_score"].values
     y_test_reg = test_df["manual_impact_score"].values
 
+    _step("Step 3/4  Appending disruption probability feature for regressor...")
     train_prob = cls.predict_proba(X_train)[:, 1]
     test_prob = cls_prob
     X_train_reg = sparse.hstack([X_train, sparse.csr_matrix(train_prob[:, None])], format="csr")
     X_test_reg = sparse.hstack([X_test, sparse.csr_matrix(test_prob[:, None])], format="csr")
 
+    _step("Step 4/4  Training impact regressor (XGBoost, 200 trees)...")
     reg = XGBRegressor(
         n_estimators=200,
         max_depth=6,
@@ -287,6 +317,8 @@ def main():
         colsample_bytree=0.8,
         random_state=args.random_state,
         n_jobs=-1,
+        verbosity=0,
+        callbacks=[TqdmProgressCallback(200, "Regressor ")],
     )
     reg.fit(X_train_reg, y_train_reg)
     reg_pred = np.maximum(0.0, reg.predict(X_test_reg))
@@ -302,6 +334,10 @@ def main():
     )
     cls_out.parent.mkdir(parents=True, exist_ok=True)
     reg_out.parent.mkdir(parents=True, exist_ok=True)
+
+    # Remove tqdm callbacks before pickling — they hold unpicklable file handles.
+    cls.set_params(callbacks=None)
+    reg.set_params(callbacks=None)
 
     cls_payload = {
         "model": cls,

@@ -385,9 +385,7 @@ def fetch_actuals_for_horizon(
     q = text(
         """
         SELECT article_timestamp::date AS ds,
-               COALESCE(AVG(
-                   LEAST(100.0, COALESCE(predicted_impact_score::double precision / 3.0, risk_score::double precision))
-               ), 0)::double precision AS y
+               COALESCE(AVG(predicted_impact_score::double precision), AVG(risk_score::double precision)) AS y
         FROM events
         WHERE matched_node @> jsonb_build_array(:node_name)
           AND article_timestamp IS NOT NULL

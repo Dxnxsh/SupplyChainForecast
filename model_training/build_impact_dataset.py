@@ -93,16 +93,20 @@ def main():
             e.article_title,
             e.event_text_segment,
             e.matched_node,
-            COALESCE(s.criticality, 1) AS node_criticality,
+            COALESCE(MAX(s.criticality), 1) AS node_criticality,
             e.ml_risk_label,
             e.ml_risk_confidence,
             e.ml_risk_probabilities,
             e.risk_score,
-            COALESCE(e.risk_score, 0.0) * COALESCE(s.criticality, 1) AS impact_score
+            COALESCE(e.risk_score, 0.0) * COALESCE(MAX(s.criticality), 1) AS impact_score
         FROM events e
         LEFT JOIN suppliers s
-          ON e.matched_node = s.node_name
+          ON e.matched_node @> jsonb_build_array(s.node_name)
         WHERE {where_sql}
+        GROUP BY e.id, e.article_timestamp, e.article_source,
+                 e.article_title, e.event_text_segment, e.matched_node,
+                 e.ml_risk_label, e.ml_risk_confidence,
+                 e.ml_risk_probabilities, e.risk_score
         """
     )
 

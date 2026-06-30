@@ -5,15 +5,14 @@ const NAV = [
   { to: "/", label: "Map", end: true },
   { to: "/sectors", label: "Sectors" },
   { to: "/products", label: "Products" },
-  { to: "/accuracy", label: "Accuracy" },
   { to: "/feed", label: "Live feed" },
+  { to: "/accuracy", label: "Accuracy" },
 ];
 
-export default function TopBar({ asOf }: { asOf?: string }) {
+export default function TopBar() {
   const [theme, setTheme] = useState<string>(
     () => localStorage.getItem("theme") || "light"
   );
-
   useEffect(() => {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("theme", theme);
@@ -59,8 +58,6 @@ export default function TopBar({ asOf }: { asOf?: string }) {
       </nav>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 11, color: "var(--alert)", letterSpacing: "0.1em" }}>● LIVE</span>
-        {asOf && <span className="label" style={{ fontSize: 11 }}>as of {asOf}</span>}
         <button className="ghost" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="toggle theme">
           <i className={theme === "light" ? "ti ti-moon" : "ti ti-sun"} aria-hidden="true" />
         </button>

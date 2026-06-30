@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { useSnapshot } from "../lib/useSnapshot";
+import { useDate } from "../lib/DateContext";
 import type { Status } from "../lib/types";
 
 interface ProductDef {
@@ -111,7 +112,8 @@ interface SectorRow {
 }
 
 export default function Products() {
-  const { data, error, loading } = useSnapshot();
+  const { asOf } = useDate();
+  const { data, error, loading } = useSnapshot(asOf);
 
   const pMap = useMemo(() => {
     if (!data) return {} as Record<string, number>;
@@ -139,7 +141,7 @@ export default function Products() {
           <div style={{ color: "var(--muted)", fontSize: 14 }}>Sector forecasts composed into approximate bill-of-materials exposure per product</div>
         </div>
         <div className="panel" style={{ padding: "6px 12px", fontSize: 11, color: "var(--muted)", maxWidth: 340 }}>
-          <i className="ti ti-info-circle" aria-hidden="true" /> These are <strong>compositions</strong> of the five sector forecasts using estimated BOM weights — not product-specific models. Treat as directional, not precise.
+          <i className="ti ti-info-circle" aria-hidden="true" /> These are <strong>compositions</strong> of the five sector forecasts using estimated BOM weights. Treat as directional, not precise.
         </div>
       </div>
 

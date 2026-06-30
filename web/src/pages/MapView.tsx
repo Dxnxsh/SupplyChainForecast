@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ComposableMap, Geographies, Geography, Marker, Line, ZoomableGroup } from "react-simple-maps";
 import { useSnapshot } from "../lib/useSnapshot";
+import { useDate } from "../lib/DateContext";
 import type { Sector, Status } from "../lib/types";
 
 const GEO_URL = `${import.meta.env.BASE_URL}data/world-110m.json`;
@@ -24,7 +25,8 @@ const LANE: [number, number][] = [
 ];
 
 export default function MapView() {
-  const { data, error, loading } = useSnapshot();
+  const { asOf } = useDate();
+  const { data, error, loading } = useSnapshot(asOf);
   const [sel, setSel] = useState<string | null>(null);
 
   const ordered = useMemo(
@@ -48,7 +50,7 @@ export default function MapView() {
     <div className="grid" style={{ gap: 12 }}>
       <div>
         <h1 className="display" style={{ margin: 0, fontSize: 24, letterSpacing: "0.03em" }}>Global situation map</h1>
-        <div style={{ color: "var(--muted)", fontSize: 14 }}>Where disruptions are happening now — sectors and live events</div>
+        <div style={{ color: "var(--muted)", fontSize: 14 }}>Where disruptions are happening now. By sectors and live events</div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 12, alignItems: "start" }}>

@@ -201,8 +201,10 @@ backtest-replay scrubber (leakage-free), SHAP why-panel, prospective tracker.
     calib disjoint, **walk-forward mean AUC 0.733** (90% folds >0.55). `scripts/test_predictor.py`.
   - T9 **(DONE)** Fresh `web/` app — 4 views (Map landing, Sectors, Products, Accuracy), paper-terminal
     skin, `build_ui_snapshot.py` bridge. In-UI metrics surfaced on the Accuracy page.
-  - T10 **(SPEC'd — see §16)** Live ingestion (RSS + Perigon recent window) → embeddings relevance
-    classifier + embedding theme-router → `events`/`disruption_candidates` (no LLM in the loop).
+  - T10 **(DONE — see §16 + §17)** LLM-free live ingestion pipeline: RSS (15 feeds) →
+    FinBERT sentiment → MiniLM relevance (thr=0.59) + theme router (τ=0.30) →
+    `events`/`disruption_candidates` → snapshot rebuild. Evidence page `/feed` in the UI.
+    All 6 build steps (T10.1–T10.6) shipped and gated. Corpus now live-growing.
 - **Phase 4 — Stretch:** T11 scheduled-event lead-time extraction.
 
 **Model-improvement menu (results):**
@@ -368,11 +370,14 @@ Scripts: `scripts/build_easy_negatives.py` (T4), `train_relevance_classifier.py`
     The lone weak fold is 2026-03 (AUC 0.51), the pervasive-disruption spike where ranking is hard
     and persistence finally works (F1 0.53). Honest and explainable.
 
-### Current standing (as of T8) — viva-defensible
-Leakage-proven pipeline; relevance F1 0.67 (>baseline); predictor walk-forward AUC 0.733 with
-onset recall 71% on new disruptions persistence cannot predict. The honest framing is **onset
-anticipation + calibrated ranking from news content**, NOT beating persistence on raw F1 (it can't;
-disruptions cluster) and NOT Brier (a constant base-rate ~0.166 beats everyone). Remaining: T9 UI.
+### Current standing (as of T10) — viva-defensible + live
+Leakage-proven pipeline; relevance F1 0.73 (embeddings, recall 89%); predictor walk-forward AUC
+0.733 with onset recall 71% on new disruptions persistence cannot predict. The honest framing is
+**onset anticipation + calibrated ranking from news content**, NOT beating persistence on raw F1
+(it can't; disruptions cluster). Full 5-view public UI at `web/` (Map, Sectors, Products, Accuracy,
+Live feed). Live ingestion loop (T10): RSS → FinBERT → MiniLM relevance/routing → DB → snapshot
+refresh every cycle, no LLM in the live path. Corpus: 180,940 articles, 558 clean events, live-growing.
+Remaining stretch: T11 lead-time extraction; rewind UI feature; predictor retrain on live-grown labels.
 
 ### Phase-2 lessons (hard-won — fold into §13)
 - **`dow` (day-of-week) is a confound — drop it.** As a feature it dominated importance (0.27)

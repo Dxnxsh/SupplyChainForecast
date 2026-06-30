@@ -195,13 +195,15 @@ def insert_events(conn, articles: list[dict]) -> list[int]:
     return inserted_ids
 
 
+CANDIDATE_P_THR = 0.75
+
 def insert_candidates(conn, articles: list[dict], label_results) -> int:
     n = 0
     from scripts.build_disruption_dataset import THEMES
     for article, result in zip(articles, label_results):
-        if not result.relevant:
+        if not result.relevant or result.P < CANDIDATE_P_THR:
             continue
-        themes = [t for t in result.themes if t in THEMES]
+        themes = [t for t in result.themes if t in THEMES][:2]
         if not themes:
             continue
         conn.execute(text("""

@@ -58,14 +58,16 @@ def main():
 
     print(f"Loaded {len(rows)} clean events")
 
-    # Build per-theme text lists
+    # Build per-theme text lists (primary theme only — tighter prototypes)
     theme_texts: dict[str, list[str]] = {t: [] for t in THEMES}
     for title, themes_json, body in rows:
         themes = themes_json if isinstance(themes_json, list) else []
+        if not themes:
+            continue
+        primary = themes[0]
         text_input = (title + " " + body[:700]).strip()
-        for theme in themes:
-            if theme in theme_texts:
-                theme_texts[theme].append(text_input)
+        if primary in theme_texts:
+            theme_texts[primary].append(text_input)
 
     for t in THEMES:
         n = len(theme_texts[t])

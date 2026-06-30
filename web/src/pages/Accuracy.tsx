@@ -53,10 +53,10 @@ export default function Accuracy() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 8 }}>
         <div>
           <h1 className="display" style={{ margin: 0, fontSize: 24, letterSpacing: "0.03em" }}>Model accuracy</h1>
-          <div style={{ color: "var(--muted)", fontSize: 14 }}>Held-out and walk-forward evidence — how good the predictions actually are</div>
+          <div style={{ color: "var(--muted)", fontSize: 14 }}>Held-out and walk-forward evidence. How good the predictions actually are</div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {checks.feature_truncation_invariance?.pass && <span className="pill calm"><i className="ti ti-shield-check" aria-hidden="true" /> no leakage</span>}
+          {/* {checks.feature_truncation_invariance?.pass && <span className="pill calm"><i className="ti ti-shield-check" aria-hidden="true" /> no leakage</span>} */}
           <span className="pill calm">walk-forward auc {wf.mean_auc?.toFixed?.(2) ?? "—"}</span>
         </div>
       </div>
@@ -68,7 +68,7 @@ export default function Accuracy() {
         <Tile label="labeled dataset" value={String(data.summary.clean_events)} sub={`${data.summary.event_days} event-days`} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 12, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 12 }}>
         <div className="panel">
           <Head tag="relevance classifier vs baselines" />
           <div style={{ padding: 14 }}>

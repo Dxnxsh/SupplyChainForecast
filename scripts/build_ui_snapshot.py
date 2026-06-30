@@ -55,9 +55,9 @@ def outlook(p):
 
 
 def status_of(p, clean_3d, clean_7d):
-    if clean_3d > 0 or p >= 0.5:
+    if p >= 0.25:
         return "active"
-    if p >= 0.2 or clean_7d > 0:
+    if p >= 0.10 or clean_3d >= 5:
         return "watch"
     return "calm"
 
@@ -69,16 +69,20 @@ SUMMARY = {
 }
 
 
-def recent_headlines(conn, kw, as_of, days=21, limit=3):
+def recent_headlines(conn, themes, kw, as_of, days=120, limit=3):
     since = (as_of - pd.Timedelta(days=days)).date()
-    rows = conn.execute(text(f"""
-        SELECT DISTINCT ON (article_title) article_title, article_timestamp::date
-        FROM events
-        WHERE {BLOB} ~ :kw AND article_timestamp::date <= :asof
-          AND article_timestamp::date > :since
-        ORDER BY article_title, article_timestamp DESC
+    rows = conn.execute(text("""
+        SELECT dc.article_title, dc.article_date
+        FROM disruption_candidates dc
+        WHERE dc.is_risk_event AND dc.strict_is_risk
+          AND dc.article_date <= :asof
+          AND dc.article_date > :since
+          AND dc.themes->>0 = ANY(:themes)
+          AND (dc.model NOT LIKE 'emb-%' OR lower(dc.article_title) ~ :kw)
+        ORDER BY dc.article_date DESC
         LIMIT :lim
-    """), {"kw": kw, "asof": as_of.date(), "since": since, "lim": limit}).fetchall()
+    """), {"asof": as_of.date(), "since": since, "themes": themes,
+           "kw": kw, "lim": limit}).fetchall()
     return [{"title": r[0][:120], "date": str(r[1])} for r in rows]
 
 
@@ -161,10 +165,16 @@ def main():
             news = daily_news(conn, TARGET_KEYWORDS[key])
             clean = clean_event_days(conn, themes)
             f = build_target_frame(news, clean, global_clean, full_idx)
-            row = f.loc[f.index <= as_of].iloc[-1]
-            raw = model.predict_proba(row[feats].values.reshape(1, -1))[:, 1]
-            p = float(np.clip(cal.predict(raw) if cal_kind == "isotonic"
-                              else cal.predict_proba(raw.reshape(-1, 1))[:, 1], 0, 1)[0])
+            # Smooth P over 3-day window to reduce single-day jitter
+            tail = f.loc[f.index <= as_of].iloc[-3:]
+            ps = []
+            for _, r in tail.iterrows():
+                raw_i = model.predict_proba(r[feats].values.reshape(1, -1))[:, 1]
+                p_i = float(np.clip(cal.predict(raw_i) if cal_kind == "isotonic"
+                                    else cal.predict_proba(raw_i.reshape(-1, 1))[:, 1], 0, 1)[0])
+                ps.append(p_i)
+            p = float(np.mean(ps))
+            row = tail.iloc[-1]
             ol, lik = outlook(p)
             st = status_of(p, row["clean_cnt_3d"], row["clean_cnt_7d"])
             name, sub, icon, lat, lon = META[key]
@@ -173,7 +183,7 @@ def main():
                 "lat": lat, "lon": lon,
                 "p": round(p, 3), "outlook": ol, "likelihood": lik, "status": st,
                 "summary": SUMMARY[st],
-                "headlines": recent_headlines(conn, TARGET_KEYWORDS[key], as_of),
+                "headlines": recent_headlines(conn, themes, TARGET_KEYWORDS[key], as_of),
             })
         points = map_points(conn, as_of)
         total_articles, clean_events, event_days = live_summary(conn)

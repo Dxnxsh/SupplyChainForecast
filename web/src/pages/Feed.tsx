@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useSnapshot } from "../lib/useSnapshot";
+import { useDate } from "../lib/DateContext";
 import type { FeedEntry } from "../lib/types";
 
 const SECTOR_SHORT: Record<string, string> = {
@@ -136,7 +137,8 @@ function EntryRow({ entry, expanded, onToggle }: {
 }
 
 export default function Feed() {
-  const { data, error, loading } = useSnapshot();
+  const { asOf } = useDate();
+  const { data, error, loading } = useSnapshot(asOf);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [filter, setFilter] = useState<"all" | "relevant" | "filtered">("all");
 
@@ -162,7 +164,7 @@ export default function Feed() {
         <div>
           <h1 className="display" style={{ margin: 0, fontSize: 24, letterSpacing: "0.03em" }}>Live feed</h1>
           <div style={{ color: "var(--muted)", fontSize: 14 }}>
-            Recent articles — how each one scored, what it was routed to, and which sector it influences
+            Recent articles. How each one scored, what it was routed to, and which sector it influences
           </div>
         </div>
         <div style={{ display: "flex", gap: 6 }}>
@@ -192,7 +194,7 @@ export default function Feed() {
         that pass are routed to a supply-chain theme via cosine similarity to theme prototypes (τ=0.30).
         Relevant articles are inserted into <code>disruption_candidates</code> and immediately shift the
         sector's rolling-window features (vol, keyword hits, sentiment). The predictor re-runs on the
-        updated features each cycle. <strong style={{ color: "var(--ink)" }}>No LLM in this loop.</strong>
+        updated features each cycle.
       </div>
 
       {feed.length === 0 ? (

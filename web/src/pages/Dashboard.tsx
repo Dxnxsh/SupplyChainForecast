@@ -1,10 +1,12 @@
 import { Link } from "react-router-dom";
 import { useSnapshot } from "../lib/useSnapshot";
+import { useDate } from "../lib/DateContext";
 import KpiStrip from "../components/KpiStrip";
 import SectorCard from "../components/SectorCard";
 
 export default function Dashboard() {
-  const { data, error, loading } = useSnapshot();
+  const { asOf } = useDate();
+  const { data, error, loading } = useSnapshot(asOf);
 
   if (loading) return <div className="label" style={{ padding: 24 }}>loading snapshot…</div>;
   if (error || !data)

@@ -8,55 +8,55 @@
     "source": "FreightWaves"
   },
   {
-    "url": "https://feeds.reuters.com/reuters/businessNews",
-    "source": "Reuters Business"
-  },
-  {
-    "url": "https://feeds.bloomberg.com/markets/news.rss",
-    "source": "Bloomberg Markets"
-  },
-  {
-    "url": "https://feeds.bbc.co.uk/news/world/rss.xml",
-    "source": "BBC World News"
-  },
-  {
-    "url": "https://apnews.com/hub/breaking-news?_suid=rss",
-    "source": "AP Breaking News"
-  },
-  {
-    "url": "https://www.joc.com/rss/joc-top-news",
-    "source": "JOC.com - Port & Logistics"
+    "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
+    "source": "CNBC Supply Chain"
   },
   {
     "url": "https://www.labornotes.org/feed",
     "source": "Labor Notes"
   },
   {
-    "url": "https://www.cisa.gov/news-events/news/rss.xml",
-    "source": "CISA - Cyber Alerts"
+    "url": "https://feeds.bloomberg.com/markets/news.rss",
+    "source": "Bloomberg Markets"
   },
   {
-    "url": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
-    "source": "USGS Earthquakes"
+    "url": "https://gcaptain.com/feed/",
+    "source": "gCaptain Maritime"
   },
   {
-    "url": "https://reliefweb.int/updates?format=rss&search=natural%20disaster",
-    "source": "ReliefWeb Disasters"
+    "url": "https://splash247.com/feed/",
+    "source": "Splash247 Shipping"
   },
   {
-    "url": "https://www.taiwannews.com.tw/feed/",
-    "source": "Taiwan News"
+    "url": "https://www.hellenicshippingnews.com/feed/",
+    "source": "Hellenic Shipping"
   },
   {
-    "url": "https://english.yonhapnews.co.kr/rss/news.xml",
-    "source": "Yonhap News - Korea"
+    "url": "https://theloadstar.com/feed/",
+    "source": "The Loadstar"
   },
   {
-    "url": "https://www.cnbc.com/id/100003114/device/rss/rss.html",
-    "source": "CNBC Supply Chain"
+    "url": "https://www.aljazeera.com/xml/rss/all.xml",
+    "source": "Al Jazeera"
   },
   {
-    "url": "https://feeds.bloomberg.com/logistics/news.rss",
-    "source": "Bloomberg Supply Chain"
+    "url": "https://rss.nytimes.com/services/xml/rss/nyt/World.xml",
+    "source": "NYT World"
+  },
+  {
+    "url": "https://www.scmp.com/rss/91/feed",
+    "source": "SCMP Asia"
+  },
+  {
+    "url": "https://www.gdacs.org/xml/rss.xml",
+    "source": "GDACS Disasters"
+  },
+  {
+    "url": "https://www.tomshardware.com/feeds/all",
+    "source": "Tom Hardware"
+  },
+  {
+    "url": "https://www.ft.com/rss/home",
+    "source": "FT Home"
   }
 ]

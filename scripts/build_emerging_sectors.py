@@ -1,4 +1,5 @@
-"""Emerging Sectors P2 — novelty-pool clustering (EMERGING_SECTORS_PLAN.md §6, P2).
+"""Emerging Sectors P1-P3 — novelty-pool clustering + burst detection
+(EMERGING_SECTORS_PLAN.md §6).
 
 Discovers candidate new sectors, LLM-free, by clustering the "unrouted" pool: clean
 disruption_candidates whose top-prototype cosine similarity (top_sim, from
@@ -7,16 +8,19 @@ HDBSCAN -> c-TF-IDF pipeline from scripts.build_topic_model, but scoped to the n
 pool and made as-of aware so historical dates can be replayed without ever seeing rows
 from the future (EMERGING_SECTORS_PLAN.md §2 constraint 2, §8).
 
+--grid replays the whole history on a weekly grid, carries stable cluster identity across
+re-fits via nearest-centroid matching, and applies the nascent/bursting/candidate status
+ladder from per-cluster weekly velocity vs its own trailing baseline (P3), writing
+data/emerging_timeline.json (the §5.1 data contract the P4 UI reads).
+
 This module owns the single-source-of-truth config block for the whole emerging-sectors
 feature (EMERGING_SECTORS_PLAN.md §7); scripts.ingest_live imports TAU_NOVEL and
 ensure_novelty_columns from here rather than defining its own copies.
 
-Does NOT yet write data/emerging_timeline.json — that is P3 (burst detection), which adds
-status/z-score/velocity on top of the cluster assignments produced here.
-
 Usage:
   venv311/bin/python -m scripts.build_emerging_sectors --backfill
   venv311/bin/python -m scripts.build_emerging_sectors --as-of 2026-05-11
+  venv311/bin/python -m scripts.build_emerging_sectors --grid
   venv311/bin/python -m scripts.build_emerging_sectors               # as-of = latest date
 """
 
@@ -55,11 +59,14 @@ TAU_NOVEL = 0.45          # novelty ceiling on top_sim; below = candidate for th
                           # on-theme content. Retune via `--tune-tau` if the corpus changes
                           # materially; see data/emerging_tuning.json for the evidence.
 MIN_CLUSTER = 8           # HDBSCAN min_cluster_size over the novelty pool          (P2, this file)
+MIN_FOR_CLUSTERING = max(6, MIN_CLUSTER)  # skip clustering below this pool size    (P2, this file)
 Z_THRESH = 2.5            # burst z-score threshold                                 (P3)
 SUSTAIN_WEEKS = 2         # consecutive bursting windows required                   (P3)
 DURABILITY_K = 30         # cumulative articles required to reach "candidate"       (P3)
 DURABILITY_WEEKS = 4      # weeks over which DURABILITY_K must accrue               (P3)
 BASELINE_WEEKS = 8        # trailing baseline window for the burst z-score          (P3)
+Z_STD_FLOOR = 0.5         # guards div-by-~0 when the baseline window is near-empty (P3)
+CENTROID_MATCH_THR = 0.85  # cosine sim to carry a stable cluster_id across grid dates (P3)
 
 TIMELINE_OUT = "data/emerging_timeline.json"   # written starting P3
 GRID_FREQ = "W"                                 # weekly grid (§8: strict-weekly default)
@@ -222,24 +229,32 @@ def topic_centroids(emb: np.ndarray, topics: np.ndarray) -> dict[int, np.ndarray
     return centroids
 
 
-def cluster_pool(pool: pd.DataFrame):
+def encode_docs(docs: list[str]) -> np.ndarray:
+    from sentence_transformers import SentenceTransformer
+    enc = SentenceTransformer(ENCODER)
+    return enc.encode(docs, batch_size=64, normalize_embeddings=True,
+                       show_progress_bar=len(docs) > 200, convert_to_numpy=True)
+
+
+def cluster_pool(pool: pd.DataFrame, emb: np.ndarray | None = None):
     """MiniLM -> UMAP -> HDBSCAN -> c-TF-IDF over the novelty pool.
 
     Mirrors scripts.build_topic_model's approach so cluster labels/keywords are produced
     the same LLM-free way, but the min_cluster_size and UMAP neighborhood shrink for small
-    pools (early as-of dates may have very few unrouted articles).
+    pools (early as-of dates may have very few unrouted articles). Pass a precomputed `emb`
+    (e.g. from encode_docs) to avoid re-encoding on every grid step (EMERGING_SECTORS_PLAN.md
+    §8: "cache embeddings in-process across grid dates").
     """
     from bertopic import BERTopic
     from hdbscan import HDBSCAN
-    from sentence_transformers import SentenceTransformer
     from sklearn.feature_extraction.text import CountVectorizer
     from umap import UMAP
 
     docs = pool["doc"].tolist()
     n_docs = len(docs)
 
-    enc = SentenceTransformer(ENCODER)
-    emb = enc.encode(docs, normalize_embeddings=True, show_progress_bar=False)
+    if emb is None:
+        emb = encode_docs(docs)
 
     min_cluster = max(2, min(MIN_CLUSTER, n_docs // 3)) if n_docs < MIN_CLUSTER * 3 else MIN_CLUSTER
     n_neighbors = max(2, min(15, n_docs - 1))
@@ -252,11 +267,12 @@ def cluster_pool(pool: pd.DataFrame):
                            vectorizer_model=vectorizer, calculate_probabilities=False, verbose=False)
     topics, _ = topic_model.fit_transform(docs, embeddings=emb)
 
-    try:
-        topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=emb)
-        topic_model.update_topics(docs, topics=topics, vectorizer_model=vectorizer)
-    except Exception as e:
-        print(f"  (outlier reduction skipped: {e})")
+    if -1 in topics:
+        try:
+            topics = topic_model.reduce_outliers(docs, topics, strategy="embeddings", embeddings=emb)
+            topic_model.update_topics(docs, topics=topics, vectorizer_model=vectorizer)
+        except Exception as e:
+            print(f"  (outlier reduction skipped: {e})")
 
     return topic_model, np.array(topics), emb
 
@@ -288,6 +304,160 @@ def summarize_pool(pool: pd.DataFrame, topic_model, topics: np.ndarray, as_of: p
     return rows
 
 
+def compute_velocity(
+    member_dates: pd.Series, as_of: pd.Timestamp, n_windows: int = BASELINE_WEEKS + 1,
+) -> tuple[list[int], int, float, float]:
+    """Weekly counts of `member_dates` in the n_windows trailing 7-day buckets ending at as_of.
+
+    Returns (velocity, n_recent, baseline_mean, baseline_std) where velocity[-1] == n_recent
+    and velocity[:-1] is the baseline window (EMERGING_SECTORS_PLAN.md §6 P3 step 1-2).
+    """
+    counts: list[int] = []
+    for i in range(n_windows, 0, -1):
+        hi = as_of - pd.Timedelta(days=7 * (i - 1))
+        lo = as_of - pd.Timedelta(days=7 * i)
+        counts.append(int(((member_dates > lo) & (member_dates <= hi)).sum()))
+    n_recent = counts[-1]
+    baseline = counts[:-1]
+    baseline_mean = float(np.mean(baseline)) if baseline else 0.0
+    baseline_std = float(np.std(baseline)) if baseline else 0.0
+    return counts, n_recent, baseline_mean, baseline_std
+
+
+def match_or_create(registry: dict, centroid: np.ndarray, next_id: list[int]) -> str:
+    """Carry a stable cluster_id across grid dates via nearest-centroid cosine match.
+
+    EMERGING_SECTORS_PLAN.md §9 risk mitigation: cluster IDs from a fresh HDBSCAN fit are not
+    stable across re-fits, so identity must be recovered by comparing centroids, not by index.
+    """
+    best_id, best_sim = None, -1.0
+    for sid, reg in registry.items():
+        sim = float(centroid @ reg["centroid"])
+        if sim > best_sim:
+            best_sim, best_id = sim, sid
+    if best_id is not None and best_sim >= CENTROID_MATCH_THR:
+        return best_id
+    new_id = f"c_{next_id[0]:03d}"
+    next_id[0] += 1
+    registry[new_id] = {"centroid": centroid, "z_history": []}
+    return new_id
+
+
+def weekly_grid(df: pd.DataFrame) -> pd.DatetimeIndex:
+    return pd.date_range(df["date"].min(), df["date"].max(), freq=GRID_FREQ)
+
+
+def run_grid(df: pd.DataFrame, tau: float = TAU_NOVEL) -> dict:
+    """P3: replay the whole history on a weekly grid, tracking burst status per stable cluster.
+
+    As-of correctness (§2 constraint 2): the pool for date D never includes rows dated after D.
+    Performance (§8, strict-weekly default): embeddings for the full (latest-date) novelty pool
+    are computed once, then sliced by date per grid step so only clustering re-runs.
+    """
+    full_pool = novelty_pool(df, as_of=None, tau=tau).reset_index(drop=True)
+    if full_pool.empty:
+        print("  grid: novelty pool is empty at this tau, nothing to do")
+        return {"dates": {}}
+
+    print(f"  grid: encoding {len(full_pool)} total unrouted articles once …")
+    full_emb = encode_docs(full_pool["doc"].tolist())
+
+    dates = weekly_grid(df)
+    registry: dict[str, dict] = {}
+    next_id = [0]
+    timeline_dates: dict[str, dict] = {}
+
+    for D in dates:
+        mask = (full_pool["date"] <= D).to_numpy()
+        n_avail = int(mask.sum())
+        if n_avail < MIN_FOR_CLUSTERING:
+            continue
+
+        sub_pool = full_pool[mask].reset_index(drop=True)
+        sub_emb = full_emb[mask]
+
+        # as-of correctness gate — must hold on every single grid step, not just spot-checks.
+        assert sub_pool.empty or sub_pool["date"].max() <= D, f"as-of leak at {D.date()}"
+
+        topic_model, topics, emb = cluster_pool(sub_pool, emb=sub_emb)
+        centroids = topic_centroids(emb, topics)
+        sub_pool = sub_pool.copy()
+        sub_pool["topic"] = topics
+
+        clusters_out = []
+        for tid, centroid in centroids.items():
+            members = sub_pool[sub_pool["topic"] == tid]
+            stable_id = match_or_create(registry, centroid, next_id)
+            reg = registry[stable_id]
+            reg["centroid"] = centroid
+            if "first_seen" not in reg:
+                reg["first_seen"] = str(members["date"].min().date())
+
+            velocity, n_recent, baseline_mean, baseline_std = compute_velocity(members["date"], D)
+            z = (n_recent - baseline_mean) / max(baseline_std, Z_STD_FLOOR)
+            reg["z_history"].append((str(D.date()), z))
+
+            recent_zs = [zz for _, zz in reg["z_history"][-SUSTAIN_WEEKS:]]
+            is_bursting = len(recent_zs) >= SUSTAIN_WEEKS and all(zz >= Z_THRESH for zz in recent_zs)
+            weeks_span = (D - pd.Timestamp(reg["first_seen"])).days / 7.0
+            is_candidate = is_bursting and len(members) >= DURABILITY_K and weeks_span >= DURABILITY_WEEKS
+            status = "candidate" if is_candidate else ("bursting" if is_bursting else "nascent")
+
+            kws = [w for w, _ in topic_model.get_topic(tid)[:6]]
+            clusters_out.append({
+                "cluster_id": stable_id,
+                "label": " ".join(kws[:4]),
+                "keywords": kws,
+                "status": status,
+                "n_total": int(len(members)),
+                "n_recent": int(n_recent),
+                "z": round(float(z), 3),
+                "velocity": velocity,
+                "first_seen": reg["first_seen"],
+                "example_titles": members["title"].head(3).tolist(),
+            })
+
+        timeline_dates[str(D.date())] = {"clusters": clusters_out}
+
+    return {"dates": timeline_dates, "registry": registry}
+
+
+def write_timeline(df: pd.DataFrame, tau: float = TAU_NOVEL) -> dict:
+    import datetime as _dt
+
+    result = run_grid(df, tau=tau)
+    timeline = {
+        "generated_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+        "grid_freq": GRID_FREQ,
+        "encoder": ENCODER,
+        "params": {
+            "tau_novel": tau, "z_thresh": Z_THRESH, "sustain_weeks": SUSTAIN_WEEKS,
+            "min_cluster_size": MIN_CLUSTER, "durability_k": DURABILITY_K,
+            "durability_weeks": DURABILITY_WEEKS,
+        },
+        "dates": result["dates"],
+    }
+    os.makedirs("data", exist_ok=True)
+    with open(TIMELINE_OUT, "w") as f:
+        json.dump(timeline, f, indent=2)
+    print(f"\n  grid: wrote {TIMELINE_OUT} ({len(result['dates'])} dates with clusterable pools, "
+          f"{len(result['registry'])} distinct stable clusters discovered)")
+
+    # Emergence ranking for the P6 replay demo (EMERGING_SECTORS_PLAN.md §6 P3):
+    # rank stable clusters by peak historical z.
+    ranked = sorted(
+        result["registry"].items(),
+        key=lambda kv: max((z for _, z in kv[1]["z_history"]), default=-1),
+        reverse=True,
+    )
+    print("\n  Candidates for the P6 replay demo (ranked by peak z):")
+    for sid, reg in ranked[:5]:
+        peak_z = max((z for _, z in reg["z_history"]), default=0.0)
+        print(f"    {sid}: peak_z={peak_z:.2f}  first_seen={reg.get('first_seen', '?')}  "
+              f"weeks_tracked={len(reg['z_history'])}")
+    return timeline
+
+
 def main():
     ap = argparse.ArgumentParser(description="Emerging-sectors novelty-pool clustering (P2)")
     ap.add_argument("--backfill", action="store_true",
@@ -302,6 +472,9 @@ def main():
     ap.add_argument("--tau", type=float, default=TAU_NOVEL,
                      help=f"Override TAU_NOVEL for this run only (default {TAU_NOVEL}); "
                           "exploration/tuning, does not change the stored is_unrouted flag")
+    ap.add_argument("--grid", action="store_true",
+                     help="Replay the full weekly grid with burst detection, write "
+                          f"{TIMELINE_OUT} (P3)")
     args = ap.parse_args()
 
     df = load_clean_candidates()
@@ -319,6 +492,10 @@ def main():
         retag_is_unrouted(TAU_NOVEL)
         df = load_clean_candidates()
 
+    if args.grid:
+        write_timeline(df, tau=args.tau)
+        return
+
     as_of = pd.Timestamp(args.as_of) if args.as_of else df["date"].max()
     pool = novelty_pool(df, as_of, tau=args.tau)
 
@@ -330,10 +507,9 @@ def main():
     print(f"\nAs-of {as_of.date()}: {len(pool)}/{denom} clean candidates up to that date are "
           f"unrouted (top_sim < {args.tau})")
 
-    min_for_clustering = max(6, MIN_CLUSTER)
-    if len(pool) < min_for_clustering:
+    if len(pool) < MIN_FOR_CLUSTERING:
         print(f"  Too few unrouted articles to cluster yet "
-              f"({len(pool)} < {min_for_clustering} minimum).")
+              f"({len(pool)} < {MIN_FOR_CLUSTERING} minimum).")
         return
 
     topic_model, topics, emb = cluster_pool(pool)

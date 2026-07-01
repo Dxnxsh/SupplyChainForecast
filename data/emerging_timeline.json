@@ -1,0 +1,1088 @@
+{
+  "generated_at": "2026-07-01T09:13:02.473356+00:00",
+  "grid_freq": "W",
+  "encoder": "sentence-transformers/all-MiniLM-L6-v2",
+  "params": {
+    "tau_novel": 0.45,
+    "z_thresh": 2.5,
+    "sustain_weeks": 2,
+    "min_cluster_size": 8,
+    "durability_k": 30,
+    "durability_weeks": 4
+  },
+  "dates": {
+    "2025-08-24": {
+      "clusters": [
+        {
+          "cluster_id": "c_000",
+          "label": "flights airlines east year",
+          "keywords": [
+            "flights",
+            "airlines",
+            "east",
+            "year",
+            "middle east",
+            "middle"
+          ],
+          "status": "nascent",
+          "n_total": 5,
+          "n_recent": 1,
+          "z": 1.5,
+          "velocity": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1
+          ],
+          "first_seen": "2025-04-24",
+          "example_titles": [
+            "Factbox: Airlines suspend Middle East flights",
+            "Airlines suspend Middle East flights",
+            "EU wildfires worst on record as burning season continues"
+          ]
+        },
+        {
+          "cluster_id": "c_001",
+          "label": "gaza duffy hamas ceasefire",
+          "keywords": [
+            "gaza",
+            "duffy",
+            "hamas",
+            "ceasefire",
+            "deal",
+            "israel"
+          ],
+          "status": "nascent",
+          "n_total": 3,
+          "n_recent": 0,
+          "z": -0.5,
+          "velocity": [
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Duffy Receives Bipartisan Support in Committee Hearing",
+            "Hamas reviews new ceasefire proposals after Trump claims Israel is ready for peace deal \u2013 as it happened",
+            "UN chief calls Israel\u2019s Gaza City plan \u2018dangerous escalation\u2019 as security council to meet on Saturday \u2013 as it happened"
+          ]
+        }
+      ]
+    },
+    "2025-08-31": {
+      "clusters": [
+        {
+          "cluster_id": "c_000",
+          "label": "flights airlines east year",
+          "keywords": [
+            "flights",
+            "airlines",
+            "east",
+            "year",
+            "middle east",
+            "middle"
+          ],
+          "status": "nascent",
+          "n_total": 5,
+          "n_recent": 0,
+          "z": -0.5,
+          "velocity": [
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            1,
+            0
+          ],
+          "first_seen": "2025-04-24",
+          "example_titles": [
+            "Factbox: Airlines suspend Middle East flights",
+            "Airlines suspend Middle East flights",
+            "EU wildfires worst on record as burning season continues"
+          ]
+        },
+        {
+          "cluster_id": "c_001",
+          "label": "gaza duffy hamas ceasefire",
+          "keywords": [
+            "gaza",
+            "duffy",
+            "hamas",
+            "ceasefire",
+            "deal",
+            "israel"
+          ],
+          "status": "nascent",
+          "n_total": 3,
+          "n_recent": 0,
+          "z": -0.5,
+          "velocity": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Duffy Receives Bipartisan Support in Committee Hearing",
+            "Hamas reviews new ceasefire proposals after Trump claims Israel is ready for peace deal \u2013 as it happened",
+            "UN chief calls Israel\u2019s Gaza City plan \u2018dangerous escalation\u2019 as security council to meet on Saturday \u2013 as it happened"
+          ]
+        }
+      ]
+    },
+    "2025-09-07": {
+      "clusters": []
+    },
+    "2025-09-14": {
+      "clusters": []
+    },
+    "2025-09-21": {
+      "clusters": []
+    },
+    "2025-09-28": {
+      "clusters": []
+    },
+    "2025-10-05": {
+      "clusters": []
+    },
+    "2025-10-12": {
+      "clusters": []
+    },
+    "2025-10-19": {
+      "clusters": []
+    },
+    "2025-10-26": {
+      "clusters": []
+    },
+    "2025-11-02": {
+      "clusters": []
+    },
+    "2025-11-09": {
+      "clusters": []
+    },
+    "2025-11-16": {
+      "clusters": []
+    },
+    "2025-11-23": {
+      "clusters": []
+    },
+    "2025-11-30": {
+      "clusters": []
+    },
+    "2025-12-07": {
+      "clusters": []
+    },
+    "2025-12-14": {
+      "clusters": []
+    },
+    "2025-12-21": {
+      "clusters": []
+    },
+    "2025-12-28": {
+      "clusters": []
+    },
+    "2026-01-04": {
+      "clusters": []
+    },
+    "2026-01-11": {
+      "clusters": []
+    },
+    "2026-01-18": {
+      "clusters": []
+    },
+    "2026-01-25": {
+      "clusters": []
+    },
+    "2026-02-01": {
+      "clusters": []
+    },
+    "2026-02-08": {
+      "clusters": []
+    },
+    "2026-02-15": {
+      "clusters": []
+    },
+    "2026-02-22": {
+      "clusters": []
+    },
+    "2026-03-01": {
+      "clusters": []
+    },
+    "2026-03-08": {
+      "clusters": []
+    },
+    "2026-03-15": {
+      "clusters": []
+    },
+    "2026-03-22": {
+      "clusters": []
+    },
+    "2026-03-29": {
+      "clusters": []
+    },
+    "2026-04-05": {
+      "clusters": []
+    },
+    "2026-04-12": {
+      "clusters": [
+        {
+          "cluster_id": "c_002",
+          "label": "lpg france energy ht",
+          "keywords": [
+            "lpg",
+            "france",
+            "energy",
+            "ht",
+            "year",
+            "paris"
+          ],
+          "status": "nascent",
+          "n_total": 17,
+          "n_recent": 1,
+          "z": 0.0,
+          "velocity": [
+            0,
+            0,
+            0,
+            0,
+            6,
+            1,
+            0,
+            1,
+            1
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        },
+        {
+          "cluster_id": "c_003",
+          "label": "flights airlines nato conflict",
+          "keywords": [
+            "flights",
+            "airlines",
+            "nato",
+            "conflict",
+            "iran",
+            "dubai"
+          ],
+          "status": "nascent",
+          "n_total": 14,
+          "n_recent": 0,
+          "z": -1.25,
+          "velocity": [
+            0,
+            0,
+            1,
+            1,
+            1,
+            0,
+            1,
+            1,
+            0
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com",
+            "Trump threatens to walk away from NATO"
+          ]
+        }
+      ]
+    },
+    "2026-04-19": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "trump flights airlines war",
+          "keywords": [
+            "trump",
+            "flights",
+            "airlines",
+            "war",
+            "ht",
+            "nato"
+          ],
+          "status": "nascent",
+          "n_total": 21,
+          "n_recent": 3,
+          "z": 3.413,
+          "velocity": [
+            0,
+            1,
+            1,
+            0,
+            0,
+            1,
+            2,
+            0,
+            3
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg energy prices gas",
+          "keywords": [
+            "lpg",
+            "energy",
+            "prices",
+            "gas",
+            "shortage",
+            "paris"
+          ],
+          "status": "nascent",
+          "n_total": 13,
+          "n_recent": 0,
+          "z": -0.498,
+          "velocity": [
+            0,
+            0,
+            0,
+            7,
+            1,
+            0,
+            0,
+            1,
+            0
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-04-26": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights airlines iran trump",
+          "keywords": [
+            "flights",
+            "airlines",
+            "iran",
+            "trump",
+            "war",
+            "navy"
+          ],
+          "status": "nascent",
+          "n_total": 23,
+          "n_recent": 3,
+          "z": 2.023,
+          "velocity": [
+            1,
+            1,
+            1,
+            0,
+            1,
+            2,
+            0,
+            3,
+            3
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg france energy paris",
+          "keywords": [
+            "lpg",
+            "france",
+            "energy",
+            "paris",
+            "prices",
+            "year"
+          ],
+          "status": "nascent",
+          "n_total": 15,
+          "n_recent": 1,
+          "z": 0.0,
+          "velocity": [
+            0,
+            0,
+            6,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-05-03": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights airlines iran trump",
+          "keywords": [
+            "flights",
+            "airlines",
+            "iran",
+            "trump",
+            "war",
+            "navy"
+          ],
+          "status": "nascent",
+          "n_total": 25,
+          "n_recent": 0,
+          "z": -1.238,
+          "velocity": [
+            1,
+            1,
+            0,
+            1,
+            2,
+            0,
+            3,
+            3,
+            0
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg energy prices year",
+          "keywords": [
+            "lpg",
+            "energy",
+            "prices",
+            "year",
+            "shortage",
+            "gas"
+          ],
+          "status": "nascent",
+          "n_total": 14,
+          "n_recent": 1,
+          "z": -0.066,
+          "velocity": [
+            0,
+            6,
+            1,
+            0,
+            0,
+            1,
+            0,
+            1,
+            1
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-05-10": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights trump iran airlines",
+          "keywords": [
+            "flights",
+            "trump",
+            "iran",
+            "airlines",
+            "navy",
+            "secretary"
+          ],
+          "status": "nascent",
+          "n_total": 22,
+          "n_recent": 1,
+          "z": -0.119,
+          "velocity": [
+            1,
+            0,
+            1,
+            2,
+            0,
+            3,
+            2,
+            0,
+            1
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg prices france energy",
+          "keywords": [
+            "lpg",
+            "prices",
+            "france",
+            "energy",
+            "fuel",
+            "paris"
+          ],
+          "status": "nascent",
+          "n_total": 18,
+          "n_recent": 0,
+          "z": -0.737,
+          "velocity": [
+            6,
+            1,
+            0,
+            0,
+            1,
+            0,
+            2,
+            1,
+            0
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-05-17": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights trump iran airlines",
+          "keywords": [
+            "flights",
+            "trump",
+            "iran",
+            "airlines",
+            "navy",
+            "secretary"
+          ],
+          "status": "nascent",
+          "n_total": 22,
+          "n_recent": 0,
+          "z": -1.068,
+          "velocity": [
+            0,
+            1,
+            2,
+            0,
+            3,
+            2,
+            0,
+            1,
+            0
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg prices france energy",
+          "keywords": [
+            "lpg",
+            "prices",
+            "france",
+            "energy",
+            "fuel",
+            "paris"
+          ],
+          "status": "nascent",
+          "n_total": 18,
+          "n_recent": 0,
+          "z": -0.898,
+          "velocity": [
+            1,
+            0,
+            0,
+            1,
+            0,
+            2,
+            1,
+            0,
+            0
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-05-24": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights trump iran airlines",
+          "keywords": [
+            "flights",
+            "trump",
+            "iran",
+            "airlines",
+            "navy",
+            "secretary"
+          ],
+          "status": "nascent",
+          "n_total": 22,
+          "n_recent": 0,
+          "z": -1.068,
+          "velocity": [
+            1,
+            2,
+            0,
+            3,
+            2,
+            0,
+            1,
+            0,
+            0
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg prices france energy",
+          "keywords": [
+            "lpg",
+            "prices",
+            "france",
+            "energy",
+            "fuel",
+            "paris"
+          ],
+          "status": "nascent",
+          "n_total": 18,
+          "n_recent": 0,
+          "z": -0.707,
+          "velocity": [
+            0,
+            0,
+            1,
+            0,
+            2,
+            1,
+            0,
+            0,
+            0
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-05-31": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights trump iran airlines",
+          "keywords": [
+            "flights",
+            "trump",
+            "iran",
+            "airlines",
+            "navy",
+            "secretary"
+          ],
+          "status": "nascent",
+          "n_total": 22,
+          "n_recent": 0,
+          "z": -0.894,
+          "velocity": [
+            2,
+            0,
+            3,
+            2,
+            0,
+            1,
+            0,
+            0,
+            0
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg prices france energy",
+          "keywords": [
+            "lpg",
+            "prices",
+            "france",
+            "energy",
+            "fuel",
+            "paris"
+          ],
+          "status": "nascent",
+          "n_total": 18,
+          "n_recent": 0,
+          "z": -0.707,
+          "velocity": [
+            0,
+            1,
+            0,
+            2,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-06-07": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights trump iran airlines",
+          "keywords": [
+            "flights",
+            "trump",
+            "iran",
+            "airlines",
+            "navy",
+            "secretary"
+          ],
+          "status": "nascent",
+          "n_total": 22,
+          "n_recent": 0,
+          "z": -0.688,
+          "velocity": [
+            0,
+            3,
+            2,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg prices france energy",
+          "keywords": [
+            "lpg",
+            "prices",
+            "france",
+            "energy",
+            "fuel",
+            "paris"
+          ],
+          "status": "nascent",
+          "n_total": 18,
+          "n_recent": 0,
+          "z": -0.707,
+          "velocity": [
+            1,
+            0,
+            2,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-06-14": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights airlines iran trump",
+          "keywords": [
+            "flights",
+            "airlines",
+            "iran",
+            "trump",
+            "war",
+            "navy"
+          ],
+          "status": "nascent",
+          "n_total": 26,
+          "n_recent": 1,
+          "z": 0.099,
+          "velocity": [
+            3,
+            3,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg energy prices year",
+          "keywords": [
+            "lpg",
+            "energy",
+            "prices",
+            "year",
+            "gas",
+            "shortage"
+          ],
+          "status": "nascent",
+          "n_total": 18,
+          "n_recent": 3,
+          "z": 5.5,
+          "velocity": [
+            0,
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            3
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-06-21": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights airlines iran trump",
+          "keywords": [
+            "flights",
+            "airlines",
+            "iran",
+            "trump",
+            "war",
+            "navy"
+          ],
+          "status": "nascent",
+          "n_total": 28,
+          "n_recent": 1,
+          "z": 0.378,
+          "velocity": [
+            3,
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            1,
+            1
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg year amid port",
+          "keywords": [
+            "lpg",
+            "year",
+            "amid",
+            "port",
+            "energy",
+            "prices"
+          ],
+          "status": "bursting",
+          "n_total": 22,
+          "n_recent": 5,
+          "z": 4.41,
+          "velocity": [
+            1,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            3,
+            5
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    },
+    "2026-06-28": {
+      "clusters": [
+        {
+          "cluster_id": "c_003",
+          "label": "flights iran airlines trump",
+          "keywords": [
+            "flights",
+            "iran",
+            "airlines",
+            "trump",
+            "war",
+            "navy"
+          ],
+          "status": "nascent",
+          "n_total": 27,
+          "n_recent": 1,
+          "z": 1.75,
+          "velocity": [
+            0,
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1
+          ],
+          "first_seen": "2025-06-17",
+          "example_titles": [
+            "A divided America processes a war that Trump has scarcely explained.",
+            "Factbox: Airlines suspend Middle East flights",
+            "Hungary to Deploy Troops to Protect itself from Ukraine? - Worldnews.com"
+          ]
+        },
+        {
+          "cluster_id": "c_002",
+          "label": "lpg port year ports",
+          "keywords": [
+            "lpg",
+            "port",
+            "year",
+            "ports",
+            "amid",
+            "long"
+          ],
+          "status": "nascent",
+          "n_total": 26,
+          "n_recent": 2,
+          "z": 0.287,
+          "velocity": [
+            1,
+            0,
+            0,
+            0,
+            0,
+            0,
+            4,
+            6,
+            2
+          ],
+          "first_seen": "2025-01-16",
+          "example_titles": [
+            "Server crash halts LPG bookings across Punjab as fuel crisis intensifies",
+            "Corn Futures Higher as Natural Gas Prices Rise - Daily Grain Highlights | Morningstar",
+            "LPG prices soar for 1st time since April last year"
+          ]
+        }
+      ]
+    }
+  }
+}

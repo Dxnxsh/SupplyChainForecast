@@ -46,8 +46,16 @@ and surface emergent themes. It is not in the live pipeline and does not feed th
 **Backend** (`src/api.py`, FastAPI):
 - `GET /api/snapshot` — current snapshot (latest DB date)
 - `GET /api/snapshot?as_of=YYYY-MM-DD` — rewind to that date (recomputes features + prediction)
-- `POST /api/ingest` — trigger one RSS ingest cycle
-- `GET /api/health` — `{"ok": true, "db_max": "..."}`
+- `POST /api/ingest` — trigger one RSS ingest cycle immediately, on top of the schedule below
+- `GET /api/health` — `{"ok": true, "db_max": "...", "ingest": {...}}`
+- **Owns live ingestion**: as long as the API process is running, a background asyncio task
+  calls `scripts.ingest_live.run_cycle()` every `INGEST_INTERVAL_SECONDS` (default 1800s), off
+  the event loop (`asyncio.to_thread`) so it never blocks snapshot requests, bounded by
+  `INGEST_CYCLE_TIMEOUT_S` (default 600s) so a hung cycle can't wedge the scheduler. This
+  replaces running `scripts.ingest_live --interval` as a separate process — starting the API
+  server is now sufficient to keep data fresh. Set `DISABLE_BACKGROUND_INGEST=true` to turn it
+  off (e.g. for tests); `/api/health`'s `ingest` block reports `running`/`last_result`/
+  `last_error` for visibility.
 
 **Frontend** (`web/`, Vite + React + react-router-dom, TypeScript):
 - `web/src/App.tsx` — routes: `/` Map, `/sectors` Dashboard, `/products` Products, `/feed` Feed,
@@ -122,6 +130,10 @@ snapshot's `metrics` block, which feeds the Accuracy page.
 `scripts/ingest_live.py` is explicitly LLM-free; these remain for offline/legacy tooling only),
 `FINBERT_MODEL`, `USE_FINBERT_RISK`, `TORCH_DEVICE`, `RSS_FEEDS_PATH`.
 
+Live-ingest scheduler (`src/api.py`, all optional): `INGEST_INTERVAL_SECONDS` (default 1800),
+`INGEST_CYCLE_TIMEOUT_S` (default 600), `INGEST_NO_GEOCODE` (default true — geocoding is
+currently broken, see below), `DISABLE_BACKGROUND_INGEST` (default false).
+
 ## Notes for future work
 
 - `legacy/` is gitignored — do not treat anything under it as live code or configuration.
@@ -129,3 +141,7 @@ snapshot's `metrics` block, which feeds the Accuracy page.
   always use/preserve the 3-day smoothing when touching prediction code.
 - `data/live_feed.json` is the rolling live-feed list rendered on the Feed page; it's
   regenerated/appended by `scripts/ingest_live.py` each cycle.
+- Geocoding (`add_geocode` in `scripts/ingest_live.py`) is currently broken — it imports
+  `src.preprocessing`, which does not exist in this repo. It's caught as a non-fatal warning per
+  cycle, but map dots and NER-based location extraction won't populate until it's reimplemented.
+  This is why `INGEST_NO_GEOCODE` defaults to true.

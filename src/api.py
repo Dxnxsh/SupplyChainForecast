@@ -1,10 +1,18 @@
-"""FastAPI backend — serves live snapshots and supports date rewind.
+"""FastAPI backend — serves live snapshots, supports date rewind, and owns live ingestion.
 
 Endpoints:
   GET /api/snapshot          → current snapshot (latest DB date)
   GET /api/snapshot?as_of=2026-06-01  → rewind to that date
-  POST /api/ingest           → trigger one RSS ingest cycle
-  GET /api/health            → {"ok": true, "db_max": "..."}
+  POST /api/ingest           → trigger one RSS ingest cycle immediately (in addition to the
+                                automatic background schedule below)
+  GET /api/health            → {"ok": true, "db_max": "...", "ingest": {...}}
+
+Background ingestion: as long as this process is running, an asyncio task calls
+scripts.ingest_live.run_cycle() every INGEST_INTERVAL_SECONDS (default 1800s), in a worker
+thread (asyncio.to_thread) so it never blocks snapshot requests. Set
+DISABLE_BACKGROUND_INGEST=true to turn this off (e.g. for tests). This replaces running
+`scripts.ingest_live --interval` as a separate process — the API server is now the single
+source of live data freshness.
 
 Run:
   venv311/bin/python -m uvicorn src.api:app --reload --port 8000
@@ -12,11 +20,12 @@ Run:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import pickle
-import subprocess
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -40,6 +49,66 @@ from scripts.build_ui_snapshot import (
     live_summary, load_feed, max_db_date, load_metric,
 )
 
+INGEST_INTERVAL_SECONDS = int(os.environ.get("INGEST_INTERVAL_SECONDS", "1800"))
+INGEST_CYCLE_TIMEOUT_S = int(os.environ.get("INGEST_CYCLE_TIMEOUT_S", "600"))
+INGEST_NO_GEOCODE = os.environ.get("INGEST_NO_GEOCODE", "true").lower() != "false"
+DISABLE_BACKGROUND_INGEST = os.environ.get("DISABLE_BACKGROUND_INGEST", "").lower() == "true"
+
+_ingest_lock = asyncio.Lock()
+_ingest_state: dict = {
+    "enabled": not DISABLE_BACKGROUND_INGEST,
+    "interval_s": INGEST_INTERVAL_SECONDS,
+    "running": False,
+    "last_started": None,
+    "last_finished": None,
+    "last_result": None,
+    "last_error": None,
+}
+
+
+async def _run_one_cycle() -> dict:
+    """Run one ingest cycle off the event loop, with a hard timeout so a hung cycle
+    (e.g. a stalled HuggingFace hub check) can't wedge the scheduler forever."""
+    from scripts.ingest_live import run_cycle
+
+    _ingest_state["running"] = True
+    _ingest_state["last_started"] = pd.Timestamp.utcnow().isoformat()
+    try:
+        summary = await asyncio.wait_for(
+            asyncio.to_thread(
+                run_cycle, skip_db=False, geocode=not INGEST_NO_GEOCODE,
+                limit=None, verbose=False,
+            ),
+            timeout=INGEST_CYCLE_TIMEOUT_S,
+        )
+        _ingest_state["last_result"] = summary
+        _ingest_state["last_error"] = None
+        return summary
+    except Exception as e:
+        _ingest_state["last_error"] = str(e)
+        raise
+    finally:
+        _ingest_state["running"] = False
+        _ingest_state["last_finished"] = pd.Timestamp.utcnow().isoformat()
+
+
+async def _ingest_loop():
+    """Runs a cycle immediately on startup, then every INGEST_INTERVAL_SECONDS thereafter
+    (measured from cycle start, like scripts.ingest_live --interval does)."""
+    while True:
+        if _ingest_lock.locked():
+            await asyncio.sleep(5)  # a manual /api/ingest trigger is in flight — wait it out
+            continue
+        t0 = time.monotonic()
+        async with _ingest_lock:
+            try:
+                await _run_one_cycle()
+            except Exception as e:
+                print(f"[scheduled ingest] cycle failed (continuing): {e}")
+        elapsed = time.monotonic() - t0
+        await asyncio.sleep(max(0, INGEST_INTERVAL_SECONDS - elapsed))
+
+
 app = FastAPI(title="Disruption Monitor API", version="1.0")
 
 app.add_middleware(
@@ -48,6 +117,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_background_task: asyncio.Task | None = None
+
+
+@app.on_event("startup")
+async def _start_background_ingest():
+    global _background_task
+    if DISABLE_BACKGROUND_INGEST:
+        print("[ingest] background scheduler disabled (DISABLE_BACKGROUND_INGEST=true)")
+        return
+    print(f"[ingest] background scheduler starting (every {INGEST_INTERVAL_SECONDS}s)")
+    _background_task = asyncio.create_task(_ingest_loop())
+
+
+@app.on_event("shutdown")
+async def _stop_background_ingest():
+    if _background_task:
+        _background_task.cancel()
 
 MODEL_PATH = "model_training/predictor.pkl"
 
@@ -152,15 +239,16 @@ def get_snapshot(as_of: str | None = Query(None, description="YYYY-MM-DD date to
 
 
 @app.post("/api/ingest")
-def trigger_ingest():
-    result = subprocess.run(
-        [sys.executable, "-m", "scripts.ingest_live", "--no-geocode"],
-        capture_output=True, text=True, timeout=300,
-    )
-    success = result.returncode == 0
-    output_lines = result.stdout.strip().split("\n") if result.stdout else []
-    summary_line = output_lines[-1] if output_lines else ""
-    return {"ok": success, "summary": summary_line, "stderr": result.stderr[-500:] if result.stderr else ""}
+async def trigger_ingest():
+    if _ingest_lock.locked():
+        return {"ok": False, "error": "an ingest cycle is already running", "state": _ingest_state}
+    try:
+        summary = await _run_one_cycle()
+        return {"ok": True, "summary": summary}
+    except asyncio.TimeoutError:
+        return {"ok": False, "error": f"ingest cycle timed out after {INGEST_CYCLE_TIMEOUT_S}s"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.get("/api/health")
@@ -168,4 +256,4 @@ def health():
     engine = create_engine(get_read_db_url())
     with engine.connect() as conn:
         db_max = max_db_date(conn)
-    return {"ok": True, "db_max": db_max}
+    return {"ok": True, "db_max": db_max, "ingest": _ingest_state}

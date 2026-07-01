@@ -44,7 +44,16 @@ ENCODER = "sentence-transformers/all-MiniLM-L6-v2"
 PROTO_PKL = "model_training/theme_prototypes.pkl"
 SEED = 42
 
-TAU_NOVEL = 0.30          # novelty ceiling on top_sim; below = candidate for the emerging pool
+TAU_NOVEL = 0.45          # novelty ceiling on top_sim; below = candidate for the emerging pool
+                          # Empirically tuned (not the routing τ=0.30 — that was tuned to
+                          # maximize gold-theme recall, a different objective). top_sim over the
+                          # 606 historical clean candidates is a smooth, ~unimodal distribution
+                          # (median 0.66, p25 0.56); there is no clean bimodal valley. At 0.30
+                          # only 2/606 rows qualify (unusable — can't cluster 2 points). 0.45 sits
+                          # just below the p10-p12 breakpoint (~0.47-0.49), giving a workable
+                          # ~55-60 row historical pool while still excluding the bulk of clearly
+                          # on-theme content. Retune via `--tune-tau` if the corpus changes
+                          # materially; see data/emerging_tuning.json for the evidence.
 MIN_CLUSTER = 8           # HDBSCAN min_cluster_size over the novelty pool          (P2, this file)
 Z_THRESH = 2.5            # burst z-score threshold                                 (P3)
 SUSTAIN_WEEKS = 2         # consecutive bursting windows required                   (P3)
@@ -130,6 +139,62 @@ def backfill_top_sim(df: pd.DataFrame) -> pd.DataFrame:
     print(f"  backfill: wrote top_sim/is_unrouted for {len(todo)} rows "
           f"({int(is_unrouted.sum())} unrouted, {int((~is_unrouted).sum())} routed)")
     return df
+
+
+def retag_is_unrouted(tau: float = TAU_NOVEL) -> int:
+    """Recompute is_unrouted for every row with a stored top_sim, against `tau`.
+
+    Cheap (no re-encoding) — use this whenever TAU_NOVEL changes, instead of --backfill
+    (which only fills rows that have never been encoded).
+    """
+    engine = create_engine(DB_CONNECTION_STRING)
+    with engine.begin() as conn:
+        ensure_novelty_columns(conn)
+        result = conn.execute(text("""
+            UPDATE disruption_candidates
+            SET is_unrouted = (top_sim < :tau)
+            WHERE top_sim IS NOT NULL
+        """), {"tau": tau})
+        n = result.rowcount
+    print(f"  retag: is_unrouted recomputed for {n} rows at tau={tau}")
+    return n
+
+
+def tune_tau(df: pd.DataFrame) -> dict:
+    """Empirical evidence for TAU_NOVEL: percentiles + histogram of top_sim (§7 tuning method).
+
+    Writes data/emerging_tuning.json (for the thesis Accuracy page) and returns the summary.
+    """
+    s = df["top_sim"].dropna().to_numpy()
+    percentiles = {p: round(float(np.percentile(s, p)), 4) for p in (1, 2, 5, 8, 10, 12, 15, 20, 25, 30, 40, 50)}
+    counts, edges = np.histogram(s, bins=20)
+    histogram = [
+        {"lo": round(float(lo), 4), "hi": round(float(hi), 4), "count": int(c)}
+        for c, lo, hi in zip(counts, edges[:-1], edges[1:])
+    ]
+    summary = {
+        "task": "emerging_sectors_tau_tuning",
+        "n": int(len(s)),
+        "mean": round(float(s.mean()), 4),
+        "std": round(float(s.std()), 4),
+        "min": round(float(s.min()), 4),
+        "max": round(float(s.max()), 4),
+        "percentiles": percentiles,
+        "histogram": histogram,
+        "chosen_tau_novel": TAU_NOVEL,
+        "n_below_chosen_tau": int((s < TAU_NOVEL).sum()),
+        "note": ("No clean bimodal valley in top_sim; the historical 'clean' candidate corpus "
+                 "was itself curated (LLM-classified or fallback-routed) against the 12 fixed "
+                 "themes, so it is a poor ground truth for 'no theme fits'. TAU_NOVEL is set "
+                 "near the p10-p12 breakpoint as a pragmatic historical-replay threshold, not a "
+                 "principled separation boundary; see EMERGING_SECTORS_PLAN.md §7."),
+    }
+    os.makedirs("data", exist_ok=True)
+    with open("data/emerging_tuning.json", "w") as f:
+        json.dump(summary, f, indent=2)
+    print(f"  tune-tau: wrote data/emerging_tuning.json "
+          f"({summary['n_below_chosen_tau']}/{summary['n']} below chosen tau={TAU_NOVEL})")
+    return summary
 
 
 def novelty_pool(df: pd.DataFrame, as_of: pd.Timestamp | None, tau: float = TAU_NOVEL) -> pd.DataFrame:
@@ -227,6 +292,11 @@ def main():
     ap = argparse.ArgumentParser(description="Emerging-sectors novelty-pool clustering (P2)")
     ap.add_argument("--backfill", action="store_true",
                      help="Backfill top_sim/is_unrouted for candidate rows that predate P1")
+    ap.add_argument("--tune-tau", action="store_true",
+                     help="Write data/emerging_tuning.json (percentiles/histogram of top_sim)")
+    ap.add_argument("--retag", action="store_true",
+                     help="Recompute is_unrouted for all rows against the current TAU_NOVEL "
+                          "(cheap, no re-encoding) — run after changing TAU_NOVEL")
     ap.add_argument("--as-of", default=None,
                      help="Cluster the novelty pool as of this date (YYYY-MM-DD); default = latest")
     ap.add_argument("--tau", type=float, default=TAU_NOVEL,
@@ -241,6 +311,13 @@ def main():
 
     if args.backfill:
         df = backfill_top_sim(df)
+
+    if args.tune_tau:
+        tune_tau(df)
+
+    if args.retag:
+        retag_is_unrouted(TAU_NOVEL)
+        df = load_clean_candidates()
 
     as_of = pd.Timestamp(args.as_of) if args.as_of else df["date"].max()
     pool = novelty_pool(df, as_of, tau=args.tau)

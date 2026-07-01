@@ -48,11 +48,9 @@ RELEVANCE_PKL = "model_training/relevance_classifier_emb.pkl"
 PROTO_PKL = "model_training/theme_prototypes.pkl"
 MODEL_EMB = "emb-minilm-logreg"
 
-# Emerging-sectors (see EMERGING_SECTORS_PLAN.md §7). A relevant article whose top-prototype
-# cosine similarity is below this is "unrouted" — a candidate for the novelty pool that the
-# offline scripts.build_emerging_sectors clusterer discovers new sectors from. Starts equal to
-# live_label.TAU_DEFAULT (the routing τ); tune independently once distributions are available.
-TAU_NOVEL = 0.30
+# Emerging-sectors (EMERGING_SECTORS_PLAN.md §7): scripts.build_emerging_sectors is the single
+# source of truth for TAU_NOVEL and the novelty-column schema; this module only consumes them.
+from scripts.build_emerging_sectors import TAU_NOVEL, ensure_novelty_columns as _ensure_novelty_columns
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -202,15 +200,6 @@ def insert_events(conn, articles: list[dict]) -> list[int]:
 
 
 CANDIDATE_P_THR = 0.75
-
-
-def _ensure_novelty_columns(conn) -> None:
-    """Emerging-sectors P1 (EMERGING_SECTORS_PLAN.md §4.1): additive, idempotent."""
-    conn.execute(text("""
-        ALTER TABLE disruption_candidates
-          ADD COLUMN IF NOT EXISTS top_sim double precision,
-          ADD COLUMN IF NOT EXISTS is_unrouted boolean DEFAULT false
-    """))
 
 
 def insert_candidates(conn, articles: list[dict], label_results) -> int:

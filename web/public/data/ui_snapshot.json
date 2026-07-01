@@ -1,14 +1,14 @@
 {
-  "as_of": "2026-06-28",
-  "generated_at": "2026-06-28T23:36:45.685503+00:00",
+  "as_of": "2026-06-30",
+  "generated_at": "2026-07-01T08:41:45.533599+00:00",
   "data_note": "Live \u2014 updated each ingestion cycle (T10).",
   "summary": {
     "active": 2,
-    "watch": 2,
-    "calm": 1,
-    "total_articles": 181391,
-    "clean_events": 584,
-    "event_days": 123
+    "watch": 3,
+    "calm": 0,
+    "total_articles": 181400,
+    "clean_events": 606,
+    "event_days": 133
   },
   "sectors": [
     {
@@ -18,7 +18,7 @@
       "icon": "ship",
       "lat": 26.6,
       "lon": 56.5,
-      "p": 0.086,
+      "p": 0.141,
       "outlook": "unlikely",
       "likelihood": "low",
       "status": "watch",
@@ -45,7 +45,7 @@
       "icon": "cpu",
       "lat": 23.7,
       "lon": 121.0,
-      "p": 0.0,
+      "p": 0.112,
       "outlook": "unlikely",
       "likelihood": "low",
       "status": "watch",
@@ -122,11 +122,11 @@
       "icon": "truck",
       "lat": 34.0,
       "lon": -118.0,
-      "p": 0.086,
-      "outlook": "unlikely",
-      "likelihood": "low",
-      "status": "calm",
-      "summary": "No significant disruptions detected. Conditions look normal.",
+      "p": 0.195,
+      "outlook": "possible",
+      "likelihood": "moderate",
+      "status": "watch",
+      "summary": "Some risk signals appearing in the news; no major disruption confirmed yet.",
       "headlines": [
         {
           "title": "California: First ILWU strike against sugar giant in decades",
@@ -153,12 +153,6 @@
       "date": "2026-06-27"
     },
     {
-      "lat": 55.75222,
-      "lon": 37.61556,
-      "title": "Key Kazakh Field Cuts Oil Output After Drones Hit Russian Plant",
-      "date": "2026-06-26"
-    },
-    {
       "lat": 35.69439,
       "lon": 51.42151,
       "title": "UN agency pauses Hormuz ship evacuation plan after first vessel attack under peace deal",
@@ -168,12 +162,6 @@
       "lat": 36.7014631,
       "lon": -118.755997,
       "title": "California: First ILWU strike against sugar giant in decades",
-      "date": "2026-06-26"
-    },
-    {
-      "lat": 27.2381259,
-      "lon": 51.1972311,
-      "title": "Asian LNG Buyers Expect Qatar to Let Force Majeure Lapse in July",
       "date": "2026-06-26"
     },
     {
@@ -189,10 +177,28 @@
       "date": "2026-06-26"
     },
     {
+      "lat": 55.75222,
+      "lon": 37.61556,
+      "title": "Key Kazakh Field Cuts Oil Output After Drones Hit Russian Plant",
+      "date": "2026-06-26"
+    },
+    {
+      "lat": 27.2381259,
+      "lon": 51.1972311,
+      "title": "Asian LNG Buyers Expect Qatar to Let Force Majeure Lapse in July",
+      "date": "2026-06-26"
+    },
+    {
       "lat": 26.4494061,
       "lon": 56.2027702,
       "title": "These Six Tankers Show Hormuz Oil Flowing Despite Setbacks",
       "date": "2026-06-26"
+    },
+    {
+      "lat": 21.73748,
+      "lon": -78.79336,
+      "title": "Venezuela Earthquake Death Toll Rises to at Least 164",
+      "date": "2026-06-25"
     },
     {
       "lat": 10.48801,
@@ -204,12 +210,6 @@
       "lat": 26.4494061,
       "lon": 56.2027702,
       "title": "Hormuz Reopening Is Quickly Flooding Oil Markets With Supply",
-      "date": "2026-06-25"
-    },
-    {
-      "lat": 21.73748,
-      "lon": -78.79336,
-      "title": "Venezuela Earthquake Death Toll Rises to at Least 164",
       "date": "2026-06-25"
     },
     {
@@ -261,15 +261,15 @@
       "date": "2026-06-22"
     },
     {
-      "lat": -34.61315,
-      "lon": -58.37723,
-      "title": "Weak mag. 2.7 earthquake - Argentina on Sunday, Jun 21, 2026, at 06:16 am (GMT -4)",
-      "date": "2026-06-21"
-    },
-    {
       "lat": 51.512773,
       "lon": -0.0906448,
       "title": "Efforts Underway for Safe Evacuation of Strait of Hormuz",
+      "date": "2026-06-21"
+    },
+    {
+      "lat": -34.61315,
+      "lon": -58.37723,
+      "title": "Weak mag. 2.7 earthquake - Argentina on Sunday, Jun 21, 2026, at 06:16 am (GMT -4)",
       "date": "2026-06-21"
     },
     {
@@ -277,12 +277,6 @@
       "lon": 109.0,
       "title": "Rescue operations underway in flood-hit regions in China's Guizhou, Guangxi",
       "date": "2026-06-21"
-    },
-    {
-      "lat": 1.3024428,
-      "lon": 103.7983085,
-      "title": "Severe weather causes flooding, heavy damage across Kentucky",
-      "date": "2026-06-18"
     },
     {
       "lat": 40.8587621,
@@ -300,6 +294,12 @@
       "lat": 1.3024428,
       "lon": 103.7983085,
       "title": "Thursday storms cause flooding and damage across Kentucky",
+      "date": "2026-06-18"
+    },
+    {
+      "lat": 1.3024428,
+      "lon": 103.7983085,
+      "title": "Severe weather causes flooding, heavy damage across Kentucky",
       "date": "2026-06-18"
     },
     {
@@ -321,15 +321,15 @@
       "date": "2026-06-13"
     },
     {
-      "lat": 26.4494061,
-      "lon": 56.2027702,
-      "title": "Vitol Says Europe and US Aren\u2019t Facing Up to Oil Supply Crunch",
-      "date": "2026-06-02"
-    },
-    {
       "lat": 22.27832,
       "lon": 114.17469,
       "title": "Chinese Curbs Risk Derailing Record Hong Kong Home-Buying Spree",
+      "date": "2026-06-02"
+    },
+    {
+      "lat": 26.4494061,
+      "lon": 56.2027702,
+      "title": "Vitol Says Europe and US Aren\u2019t Facing Up to Oil Supply Crunch",
       "date": "2026-06-02"
     },
     {
@@ -337,15 +337,108 @@
       "lon": 51.42151,
       "title": "Trump Says Deal Will \u2018Work Out Well\u2019 Even as US, Iran Clash | The Opening Trade 6/1/2026",
       "date": "2026-06-01"
-    },
-    {
-      "lat": 26.4494061,
-      "lon": 56.2027702,
-      "title": "Oil exports through the Strait of Hormuz might not return to levels seen before the Iran w",
-      "date": "2026-05-30"
     }
   ],
   "feed": [
+    {
+      "ts": "Tue, 30 Jun 2026 11:54:22 -0400",
+      "source": "SupplyChainDive",
+      "title": "GM invests $275M in Tennessee plant",
+      "url": "https://www.supplychaindive.com/news/gm-invests-275m-in-tennessee-plant/824045/",
+      "relevance_p": 0.1138,
+      "relevant": false,
+      "theme": null,
+      "sentiment_score": 0.822,
+      "sector_key": null
+    },
+    {
+      "ts": "Tue, 30 Jun 2026 11:18:35 -0400",
+      "source": "SupplyChainDive",
+      "title": "FedEx to return full MD-11 capacity ahead of peak season",
+      "url": "https://www.supplychaindive.com/news/fedex-to-return-full-md-11-capacity-ahead-of-peak-season/824004/",
+      "relevance_p": 0.1219,
+      "relevant": false,
+      "theme": null,
+      "sentiment_score": 0.756,
+      "sector_key": null
+    },
+    {
+      "ts": "Tue, 30 Jun 2026 10:13:16 -0400",
+      "source": "SupplyChainDive",
+      "title": "HelloFresh boosts chilled fulfillment capacity via robotics",
+      "url": "https://www.supplychaindive.com/news/hellofresh-boosts-chilled-fulfillment-capacity-via-robotics/823994/",
+      "relevance_p": 0.0121,
+      "relevant": false,
+      "theme": null,
+      "sentiment_score": 0.844,
+      "sector_key": null
+    },
+    {
+      "ts": "Tue, 30 Jun 2026 07:05:00 -0400",
+      "source": "SupplyChainDive",
+      "title": "Lovesac on track with tariff-driven onshoring effort",
+      "url": "https://www.supplychaindive.com/news/lovesac-on-track-with-tariff-driven-onshoring-effort/824009/",
+      "relevance_p": 0.1292,
+      "relevant": false,
+      "theme": null,
+      "sentiment_score": 0.839,
+      "sector_key": null
+    },
+    {
+      "ts": "Mon, 29 Jun 2026 15:00:00 -0400",
+      "source": "SupplyChainDive",
+      "title": "Last-mile AI: Pointed at the wrong problems",
+      "url": "https://www.supplychaindive.com/spons/last-mile-ai-pointed-at-the-wrong-problems/823849/",
+      "relevance_p": 0.0635,
+      "relevant": false,
+      "theme": null,
+      "sentiment_score": 0.0,
+      "sector_key": null
+    },
+    {
+      "ts": "Mon, 29 Jun 2026 11:17:24 -0400",
+      "source": "SupplyChainDive",
+      "title": "Del Monte faces about $40M headwind from primarily ocean freight",
+      "url": "https://www.supplychaindive.com/news/del-monte-faces-about-40m-headwind-from-primarily-ocean-freight/823783/",
+      "relevance_p": 0.7788,
+      "relevant": true,
+      "theme": "Strait of Hormuz / Gulf shipping",
+      "sentiment_score": -0.952,
+      "sector_key": "shipping_chokepoints"
+    },
+    {
+      "ts": "Mon, 29 Jun 2026 11:06:37 -0400",
+      "source": "SupplyChainDive",
+      "title": "Toyota North America adjusts supply chain, manufacturing leadership",
+      "url": "https://www.supplychaindive.com/news/toyota-north-america-adjusts-supply-chain-manufacturing-leadership/823798/",
+      "relevance_p": 0.0775,
+      "relevant": false,
+      "theme": null,
+      "sentiment_score": 0.0,
+      "sector_key": null
+    },
+    {
+      "ts": "Mon, 29 Jun 2026 08:57:21 -0400",
+      "source": "SupplyChainDive",
+      "title": "Majors Management taps AI tool for pricing, inventory and operations",
+      "url": "https://www.supplychaindive.com/news/majors-management-taps-ai-tool-for-pricing-inventory-and-operations/823870/",
+      "relevance_p": 0.2238,
+      "relevant": false,
+      "theme": null,
+      "sentiment_score": 0.0,
+      "sector_key": null
+    },
+    {
+      "ts": "Mon, 29 Jun 2026 08:17:00 -0400",
+      "source": "SupplyChainDive",
+      "title": "CBP readies more stringent data requirements for postal imports",
+      "url": "https://www.supplychaindive.com/news/cbp-readies-more-stringent-data-requirements-for-postal-imports/823923/",
+      "relevance_p": 0.0178,
+      "relevant": false,
+      "theme": null,
+      "sentiment_score": -0.837,
+      "sector_key": null
+    },
     {
       "ts": "Sun, 28 Jun 2026 22:00:07 GMT",
       "source": "Bloomberg Markets",
@@ -1565,105 +1658,6 @@
       "relevant": false,
       "theme": null,
       "sentiment_score": -0.48,
-      "sector_key": null
-    },
-    {
-      "ts": "Sun, 28 Jun 2026 17:41:33 +0000",
-      "source": "NYT World",
-      "title": "Dozens of Dogs Join Search for Venezuela Earthquake Survivors",
-      "url": "https://www.nytimes.com/2026/06/28/world/americas/rescue-dogs-canine-units-earthquake-venezuela.html",
-      "relevance_p": 0.0112,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": 0.0,
-      "sector_key": null
-    },
-    {
-      "ts": "Sun, 28 Jun 2026 20:37:40 +0000",
-      "source": "NYT World",
-      "title": "Here\u2019s the latest.",
-      "url": "https://www.nytimes.com/live/2026/06/28/world/venezuela-earthquake/heres-the-latest",
-      "relevance_p": 0.0918,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": 0.0,
-      "sector_key": null
-    },
-    {
-      "ts": "Sun, 28 Jun 2026 21:00:54 +0000",
-      "source": "NYT World",
-      "title": "Here\u2019s the latest.",
-      "url": "https://www.nytimes.com/live/2026/06/28/world/us-iran-strikes-hormuz/heres-the-latest",
-      "relevance_p": 0.0918,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": 0.0,
-      "sector_key": null
-    },
-    {
-      "ts": "Sun, 28 Jun 2026 13:55:09 +0000",
-      "source": "NYT World",
-      "title": "U.S. Officials Said to Be Frustrated With Machado\u2019s Call for Help",
-      "url": "https://www.nytimes.com/2026/06/27/world/americas/us-officials-frustrated-with-exiled-venezuelan-leaders-call-for-help.html",
-      "relevance_p": 0.0297,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": -0.889,
-      "sector_key": null
-    },
-    {
-      "ts": "Sat, 27 Jun 2026 23:14:57 +0000",
-      "source": "NYT World",
-      "title": "A Rush of Volunteers in Venezuela Has Slowed Rescue Efforts",
-      "url": "https://www.nytimes.com/2026/06/27/world/americas/venezuela-earthquake-volunteers-traffic.html",
-      "relevance_p": 0.06,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": -0.961,
-      "sector_key": null
-    },
-    {
-      "ts": "Sun, 28 Jun 2026 21:19:39 +0000",
-      "source": "NYT World",
-      "title": "12 Hours With Venezuelan Doctors Searching for Earthquake Survivors",
-      "url": "https://www.nytimes.com/2026/06/27/world/americas/venezuela-earthquakes-doctors-rescues.html",
-      "relevance_p": 0.1174,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": 0.0,
-      "sector_key": null
-    },
-    {
-      "ts": "Sun, 28 Jun 2026 09:44:41 +0000",
-      "source": "NYT World",
-      "title": "Foreign rescuers in Venezuela battle debris, scarcity of supplies and time.",
-      "url": "https://www.nytimes.com/live/2026/06/27/world/venezuela-earthquake/foreign-rescuers-in-venezuela-battle-debris-scarcity-of-supplies-and-time",
-      "relevance_p": 0.1989,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": -0.483,
-      "sector_key": null
-    },
-    {
-      "ts": "Sat, 27 Jun 2026 20:28:26 +0000",
-      "source": "NYT World",
-      "title": "A Close Call With an Alberta Grizzly Bear, Recorded in Its Entirety",
-      "url": "https://www.nytimes.com/2026/06/27/world/canada/grizzly-bear-alberta-canada-video.html",
-      "relevance_p": 0.0113,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": 0.0,
-      "sector_key": null
-    },
-    {
-      "ts": "Sat, 27 Jun 2026 20:30:17 +0000",
-      "source": "NYT World",
-      "title": "In the Ruins of Venezuela\u2019s Earthquake, Civilians Volunteers Fill the Gaps",
-      "url": "https://www.nytimes.com/2026/06/27/world/americas/venezuela-civilians-volunteers-earthquakes.html",
-      "relevance_p": 0.0535,
-      "relevant": false,
-      "theme": null,
-      "sentiment_score": 0.0,
       "sector_key": null
     }
   ],

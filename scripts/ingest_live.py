@@ -48,6 +48,12 @@ RELEVANCE_PKL = "model_training/relevance_classifier_emb.pkl"
 PROTO_PKL = "model_training/theme_prototypes.pkl"
 MODEL_EMB = "emb-minilm-logreg"
 
+# Emerging-sectors (see EMERGING_SECTORS_PLAN.md §7). A relevant article whose top-prototype
+# cosine similarity is below this is "unrouted" — a candidate for the novelty pool that the
+# offline scripts.build_emerging_sectors clusterer discovers new sectors from. Starts equal to
+# live_label.TAU_DEFAULT (the routing τ); tune independently once distributions are available.
+TAU_NOVEL = 0.30
+
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 def _strip_html(text: str) -> str:
@@ -197,6 +203,16 @@ def insert_events(conn, articles: list[dict]) -> list[int]:
 
 CANDIDATE_P_THR = 0.75
 
+
+def _ensure_novelty_columns(conn) -> None:
+    """Emerging-sectors P1 (EMERGING_SECTORS_PLAN.md §4.1): additive, idempotent."""
+    conn.execute(text("""
+        ALTER TABLE disruption_candidates
+          ADD COLUMN IF NOT EXISTS top_sim double precision,
+          ADD COLUMN IF NOT EXISTS is_unrouted boolean DEFAULT false
+    """))
+
+
 def insert_candidates(conn, articles: list[dict], label_results) -> int:
     n = 0
     from scripts.build_disruption_dataset import THEMES
@@ -206,17 +222,20 @@ def insert_candidates(conn, articles: list[dict], label_results) -> int:
         themes = [t for t in result.themes if t in THEMES][:2]
         if not themes:
             continue
+        is_unrouted = result.top_sim < TAU_NOVEL
         conn.execute(text("""
             INSERT INTO disruption_candidates (
                 article_title, article_id, article_url, article_date,
                 is_risk_event, strict_is_risk,
                 themes, risk_type, confidence, reason,
-                model, strict_model
+                model, strict_model,
+                top_sim, is_unrouted
             ) VALUES (
                 :title, :aid, :url, :adate,
                 true, true,
                 CAST(:themes AS jsonb), :rtype, :conf, :reason,
-                :model, :model
+                :model, :model,
+                :top_sim, :is_unrouted
             )
             ON CONFLICT (article_title) DO NOTHING
         """), {
@@ -229,6 +248,8 @@ def insert_candidates(conn, articles: list[dict], label_results) -> int:
             "conf": result.P,
             "reason": f"emb-relevance P={result.P:.3f} ≥ 0.59; top_theme_sim={result.top_sim:.3f}",
             "model": MODEL_EMB,
+            "top_sim": result.top_sim,
+            "is_unrouted": is_unrouted,
         })
         n += 1
     return n
@@ -353,6 +374,7 @@ def run_cycle(
 
     # DB writes
     with engine.begin() as conn:
+        _ensure_novelty_columns(conn)
         inserted_ids = insert_events(conn, articles)
         n_events = len(inserted_ids)
         n_candidates = insert_candidates(conn, articles, label_results)

@@ -1,5 +1,104 @@
 [
   {
+    "ts": "Tue, 30 Jun 2026 11:54:22 -0400",
+    "source": "SupplyChainDive",
+    "title": "GM invests $275M in Tennessee plant",
+    "url": "https://www.supplychaindive.com/news/gm-invests-275m-in-tennessee-plant/824045/",
+    "relevance_p": 0.1138,
+    "relevant": false,
+    "theme": null,
+    "sentiment_score": 0.822,
+    "sector_key": null
+  },
+  {
+    "ts": "Tue, 30 Jun 2026 11:18:35 -0400",
+    "source": "SupplyChainDive",
+    "title": "FedEx to return full MD-11 capacity ahead of peak season",
+    "url": "https://www.supplychaindive.com/news/fedex-to-return-full-md-11-capacity-ahead-of-peak-season/824004/",
+    "relevance_p": 0.1219,
+    "relevant": false,
+    "theme": null,
+    "sentiment_score": 0.756,
+    "sector_key": null
+  },
+  {
+    "ts": "Tue, 30 Jun 2026 10:13:16 -0400",
+    "source": "SupplyChainDive",
+    "title": "HelloFresh boosts chilled fulfillment capacity via robotics",
+    "url": "https://www.supplychaindive.com/news/hellofresh-boosts-chilled-fulfillment-capacity-via-robotics/823994/",
+    "relevance_p": 0.0121,
+    "relevant": false,
+    "theme": null,
+    "sentiment_score": 0.844,
+    "sector_key": null
+  },
+  {
+    "ts": "Tue, 30 Jun 2026 07:05:00 -0400",
+    "source": "SupplyChainDive",
+    "title": "Lovesac on track with tariff-driven onshoring effort",
+    "url": "https://www.supplychaindive.com/news/lovesac-on-track-with-tariff-driven-onshoring-effort/824009/",
+    "relevance_p": 0.1292,
+    "relevant": false,
+    "theme": null,
+    "sentiment_score": 0.839,
+    "sector_key": null
+  },
+  {
+    "ts": "Mon, 29 Jun 2026 15:00:00 -0400",
+    "source": "SupplyChainDive",
+    "title": "Last-mile AI: Pointed at the wrong problems",
+    "url": "https://www.supplychaindive.com/spons/last-mile-ai-pointed-at-the-wrong-problems/823849/",
+    "relevance_p": 0.0635,
+    "relevant": false,
+    "theme": null,
+    "sentiment_score": 0.0,
+    "sector_key": null
+  },
+  {
+    "ts": "Mon, 29 Jun 2026 11:17:24 -0400",
+    "source": "SupplyChainDive",
+    "title": "Del Monte faces about $40M headwind from primarily ocean freight",
+    "url": "https://www.supplychaindive.com/news/del-monte-faces-about-40m-headwind-from-primarily-ocean-freight/823783/",
+    "relevance_p": 0.7788,
+    "relevant": true,
+    "theme": "Strait of Hormuz / Gulf shipping",
+    "sentiment_score": -0.952,
+    "sector_key": "shipping_chokepoints"
+  },
+  {
+    "ts": "Mon, 29 Jun 2026 11:06:37 -0400",
+    "source": "SupplyChainDive",
+    "title": "Toyota North America adjusts supply chain, manufacturing leadership",
+    "url": "https://www.supplychaindive.com/news/toyota-north-america-adjusts-supply-chain-manufacturing-leadership/823798/",
+    "relevance_p": 0.0775,
+    "relevant": false,
+    "theme": null,
+    "sentiment_score": 0.0,
+    "sector_key": null
+  },
+  {
+    "ts": "Mon, 29 Jun 2026 08:57:21 -0400",
+    "source": "SupplyChainDive",
+    "title": "Majors Management taps AI tool for pricing, inventory and operations",
+    "url": "https://www.supplychaindive.com/news/majors-management-taps-ai-tool-for-pricing-inventory-and-operations/823870/",
+    "relevance_p": 0.2238,
+    "relevant": false,
+    "theme": null,
+    "sentiment_score": 0.0,
+    "sector_key": null
+  },
+  {
+    "ts": "Mon, 29 Jun 2026 08:17:00 -0400",
+    "source": "SupplyChainDive",
+    "title": "CBP readies more stringent data requirements for postal imports",
+    "url": "https://www.supplychaindive.com/news/cbp-readies-more-stringent-data-requirements-for-postal-imports/823923/",
+    "relevance_p": 0.0178,
+    "relevant": false,
+    "theme": null,
+    "sentiment_score": -0.837,
+    "sector_key": null
+  },
+  {
     "ts": "Sun, 28 Jun 2026 22:00:07 GMT",
     "source": "Bloomberg Markets",
     "title": "BlueBay Sees Near-Term Risk in Japan AI Stocks Followed by Rally",
@@ -2099,104 +2198,5 @@
     "theme": "China electronics manufacturing",
     "sentiment_score": 0.928,
     "sector_key": "semiconductor_electronics"
-  },
-  {
-    "ts": "Sun, 28 Jun 2026 02:10:55 +0000",
-    "source": "SCMP Asia",
-    "title": "Iran strikes American bases in Bahrain, Kuwait amid US offensive",
-    "url": "https://www.scmp.com/news/world/middle-east/article/3358626/iranian-drones-target-bahrain-after-us-offensive-straining-ceasefire?utm_source=rss_feed",
-    "relevance_p": 0.5605,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": -0.877,
-    "sector_key": null
-  },
-  {
-    "ts": "Sun, 28 Jun 2026 02:00:14 +0000",
-    "source": "SCMP Asia",
-    "title": "What Beijing hopes to achieve with new ethnic unity law that targets people overseas",
-    "url": "https://www.scmp.com/news/china/politics/article/3358603/what-beijing-hopes-achieve-new-ethnic-unity-law-targets-people-overseas?utm_source=rss_feed",
-    "relevance_p": 0.007,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": 0.0,
-    "sector_key": null
-  },
-  {
-    "ts": "Sun, 28 Jun 2026 02:00:08 +0000",
-    "source": "SCMP Asia",
-    "title": "\u2018Too late\u2019: why some Malukans say a Dutch apology isn\u2019t enough",
-    "url": "https://www.scmp.com/week-asia/people/article/3358545/too-late-why-some-malukans-say-dutch-apology-isnt-enough?utm_source=rss_feed",
-    "relevance_p": 0.0606,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": -0.853,
-    "sector_key": null
-  },
-  {
-    "ts": "Sun, 28 Jun 2026 01:30:07 +0000",
-    "source": "SCMP Asia",
-    "title": "Hong Kong\u2019s AI push needs a broader vision and more realistic goals",
-    "url": "https://www.scmp.com/opinion/hong-kong-opinion/article/3358342/hong-kongs-ai-push-needs-broader-vision-and-more-realistic-goals?utm_source=rss_feed",
-    "relevance_p": 0.0378,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": 0.861,
-    "sector_key": null
-  },
-  {
-    "ts": "Sun, 28 Jun 2026 01:00:16 +0000",
-    "source": "SCMP Asia",
-    "title": "Devoted police dog moves millions in China by waiting for injured handler, refusing food",
-    "url": "https://www.scmp.com/news/people-culture/trending-china/article/3358623/devoted-police-dog-moves-millions-china-waiting-injured-handler-refusing-food?utm_source=rss_feed",
-    "relevance_p": 0.0146,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": 0.0,
-    "sector_key": null
-  },
-  {
-    "ts": "Sun, 28 Jun 2026 01:00:13 +0000",
-    "source": "SCMP Asia",
-    "title": "Financial products or illicit gambling? Can Hong Kong regulate prediction markets?",
-    "url": "https://www.scmp.com/news/hong-kong/law-and-crime/article/3358613/financial-products-or-illicit-gambling-can-hong-kong-regulate-prediction-markets?utm_source=rss_feed",
-    "relevance_p": 0.0434,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": -0.872,
-    "sector_key": null
-  },
-  {
-    "ts": "Sun, 28 Jun 2026 01:00:08 +0000",
-    "source": "SCMP Asia",
-    "title": "Will Japan\u2019s tourist visa fees, interest rate policy impact its booming property market?",
-    "url": "https://www.scmp.com/business/article/3358584/will-japans-tourist-visa-fees-interest-rate-policy-impact-its-booming-property-market?utm_source=rss_feed",
-    "relevance_p": 0.0104,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": 0.0,
-    "sector_key": null
-  },
-  {
-    "ts": "Sun, 28 Jun 2026 00:00:15 +0000",
-    "source": "SCMP Asia",
-    "title": "Why Malaysia\u2019s tourism boom lives and dies on a Chinese app",
-    "url": "https://www.scmp.com/week-asia/lifestyle-culture/article/3358520/why-malaysias-tourism-boom-lives-and-dies-chinese-app?utm_source=rss_feed",
-    "relevance_p": 0.0345,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": 0.0,
-    "sector_key": null
-  },
-  {
-    "ts": "Tue, 02 Jun 2026 05:45:56 GMT",
-    "source": "GDACS Disasters",
-    "title": "Green flood alert in T\u00fcrkiye",
-    "url": "https://www.gdacs.org/report.aspx?eventtype=FL&eventid=1103920",
-    "relevance_p": 0.1223,
-    "relevant": false,
-    "theme": null,
-    "sentiment_score": -0.842,
-    "sector_key": null
   }
 ]

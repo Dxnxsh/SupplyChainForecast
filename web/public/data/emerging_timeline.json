@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-01T09:13:02.473356+00:00",
+  "generated_at": "2026-07-01T09:26:46.890394+00:00",
   "grid_freq": "W",
   "encoder": "sentence-transformers/all-MiniLM-L6-v2",
   "params": {

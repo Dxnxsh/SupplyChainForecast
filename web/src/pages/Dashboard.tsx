@@ -3,6 +3,7 @@ import { useSnapshot } from "../lib/useSnapshot";
 import { useDate } from "../lib/DateContext";
 import KpiStrip from "../components/KpiStrip";
 import SectorCard from "../components/SectorCard";
+import EmergingRisks from "../components/EmergingRisks";
 
 export default function Dashboard() {
   const { asOf } = useDate();
@@ -56,6 +57,8 @@ export default function Dashboard() {
           <SectorCard key={s.key} s={s} />
         ))}
       </div>
+
+      <EmergingRisks />
 
       <div className="panel" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", gap: 10, flexWrap: "wrap" }}>
         <div style={{ fontSize: 13, color: "var(--muted)" }}>

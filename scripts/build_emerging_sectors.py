@@ -68,7 +68,8 @@ BASELINE_WEEKS = 8        # trailing baseline window for the burst z-score      
 Z_STD_FLOOR = 0.5         # guards div-by-~0 when the baseline window is near-empty (P3)
 CENTROID_MATCH_THR = 0.85  # cosine sim to carry a stable cluster_id across grid dates (P3)
 
-TIMELINE_OUT = "data/emerging_timeline.json"   # written starting P3
+TIMELINE_OUT = "web/public/data/emerging_timeline.json"   # served as a static asset (P4 UI),
+                                                            # mirrors build_ui_snapshot.py's OUT
 GRID_FREQ = "W"                                 # weekly grid (§8: strict-weekly default)
 
 
@@ -437,7 +438,7 @@ def write_timeline(df: pd.DataFrame, tau: float = TAU_NOVEL) -> dict:
         },
         "dates": result["dates"],
     }
-    os.makedirs("data", exist_ok=True)
+    os.makedirs(os.path.dirname(TIMELINE_OUT), exist_ok=True)
     with open(TIMELINE_OUT, "w") as f:
         json.dump(timeline, f, indent=2)
     print(f"\n  grid: wrote {TIMELINE_OUT} ({len(result['dates'])} dates with clusterable pools, "

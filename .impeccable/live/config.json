@@ -1,6 +1,0 @@
-{
-  "files": ["chain-calm-main/index.html"],
-  "insertBefore": "</body>",
-  "commentSyntax": "html",
-  "cspChecked": true
-}

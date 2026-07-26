@@ -11,9 +11,17 @@ P(disruption in next 1-3 days) per sector from rolling-window news/event feature
 dashboard (`web/`) reads a FastAPI backend (`src/api.py`) and supports rewinding to any past date.
 
 This is a from-scratch v2. The prior project (Two-Stage XGBoost forecast snapshots, node-level
-impact regression, `chain-calm-main/` frontend) lives under `legacy/` (gitignored, not part of
-the active app — its own `legacy/CLAUDE.md` documents that old architecture and should not be
-used for v2 work). Full v2 design rationale/spec: `DISRUPTION_REBUILD_DESIGN.md`.
+impact regression, `chain-calm-main/` frontend) has been removed entirely (2026-07) — it's no
+longer present in the repo or its history's working tree, only reachable via old commits if ever
+needed. Full v2 design rationale/spec: `DISRUPTION_REBUILD_DESIGN.md` (gitignored — a local
+working doc, not shipped with a fresh clone).
+
+**Live deployment**: hosted on GCP Compute Engine (e2-standard-2) at
+**https://fyp.meordnsh.dev**, behind nginx (static frontend + `/api/` reverse proxy to uvicorn on
+`127.0.0.1:8000`) with a Let's Encrypt cert (auto-renews via `certbot.timer`). The API runs as
+systemd unit `scf-api` (`/etc/systemd/system/scf-api.service`), enabled on boot, `Restart=on-failure`.
+Postgres runs locally on the instance (not managed/Cloud SQL). `main` is the single active
+branch — all prior feature branches have been merged and deleted.
 
 ## Architecture
 
@@ -49,13 +57,19 @@ and surface emergent themes. It is not in the live pipeline and does not feed th
 - `POST /api/ingest` — trigger one RSS ingest cycle immediately, on top of the schedule below
 - `GET /api/health` — `{"ok": true, "db_max": "...", "ingest": {...}}`
 - **Owns live ingestion**: as long as the API process is running, a background asyncio task
-  calls `scripts.ingest_live.run_cycle()` every `INGEST_INTERVAL_SECONDS` (default 1800s), off
-  the event loop (`asyncio.to_thread`) so it never blocks snapshot requests, bounded by
-  `INGEST_CYCLE_TIMEOUT_S` (default 600s) so a hung cycle can't wedge the scheduler. This
+  spawns `python -m scripts.ingest_live` as a **fresh subprocess** every `INGEST_INTERVAL_SECONDS`
+  (default 1800s) — subprocess rather than in-process `asyncio.to_thread`, because FinBERT's MPS
+  backend has thread-safety issues across repeated calls within one long-lived process. Bounded
+  by `INGEST_CYCLE_TIMEOUT_S` (default 600s) so a hung cycle can't wedge the scheduler. This
   replaces running `scripts.ingest_live --interval` as a separate process — starting the API
   server is now sufficient to keep data fresh. Set `DISABLE_BACKGROUND_INGEST=true` to turn it
   off (e.g. for tests); `/api/health`'s `ingest` block reports `running`/`last_result`/
   `last_error` for visibility.
+- **DB engine**: a single module-level `engine = create_engine(get_read_db_url(),
+  pool_pre_ping=True)` is created once at import time and reused by every request handler.
+  Do not call `create_engine()` inside a request handler — an earlier version did this on every
+  `/api/snapshot` and `/api/health` call, leaking a new connection pool per request (found in
+  production after ~45 idle connections accumulated in a few hours against `max_connections=100`).
 
 **Frontend** (`web/`, Vite + React + react-router-dom, TypeScript):
 - `web/src/App.tsx` — routes: `/` Map, `/sectors` Dashboard, `/products` Products, `/feed` Feed,
@@ -136,7 +150,11 @@ implemented and enabled by default, see below), `DISABLE_BACKGROUND_INGEST` (def
 
 ## Notes for future work
 
-- `legacy/` is gitignored — do not treat anything under it as live code or configuration.
+- **`google-genai` is a hard import even though it's functionally unused in the live path**:
+  `src/api.py` → `scripts.train_predictor` → `scripts.build_disruption_dataset` →
+  `src/gemini_client.py` → `from google import genai`. A minimal/live-only dependency install
+  still needs `google-genai` installed just to satisfy this import chain, or `src.api` fails to
+  import entirely. Found when building a scoped `requirements_deploy.txt` for the GCE instance.
 - The predictor's calibrator is sparse (~584 events), so raw single-day P is nearly 3-valued;
   always use/preserve the 3-day smoothing when touching prediction code.
 - `data/live_feed.json` is the rolling live-feed list rendered on the Feed page; it's

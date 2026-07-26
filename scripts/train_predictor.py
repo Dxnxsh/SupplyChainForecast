@@ -84,8 +84,13 @@ def get_engine():
     return create_engine(get_read_db_url())
 
 
-def daily_news(conn, kw_regex):
-    """Per-day topical aggregates from the RAW corpus for one target's keyword stream."""
+def daily_news(conn, kw_regex, end=GRID_END):
+    """Per-day topical aggregates from the RAW corpus for one target's keyword stream.
+
+    `end` defaults to the training grid's closing date (GRID_END). Live callers building a
+    snapshot for a specific as-of date must pass `end=<that date>` — otherwise this query
+    silently truncates at GRID_END regardless of how recent the requested date actually is.
+    """
     q = text(f"""
         SELECT article_timestamp::date AS d,
                COUNT(*) AS cnt,
@@ -97,7 +102,7 @@ def daily_news(conn, kw_regex):
           AND {BLOB} ~ :kw
         GROUP BY 1 ORDER BY 1
     """)
-    rows = conn.execute(q, {"cand": CANDIDATE_RE, "kw": kw_regex, "a": LOOKBACK_START, "b": GRID_END}).fetchall()
+    rows = conn.execute(q, {"cand": CANDIDATE_RE, "kw": kw_regex, "a": LOOKBACK_START, "b": end}).fetchall()
     df = pd.DataFrame(rows, columns=["d", "cnt", "smean", "smin", "hits"])
     df["d"] = pd.to_datetime(df["d"])
     return df.set_index("d")

@@ -1,4 +1,5 @@
 import { useSnapshot } from "../lib/useSnapshot";
+import { useIsMobile } from "../lib/useIsMobile";
 
 const pct = (x: number | undefined) => (x == null ? "—" : `${Math.round(x * 100)}%`);
 
@@ -35,6 +36,7 @@ function Bar({ name, f1, detail, tone, width }: { name: string; f1: string; deta
 
 export default function Accuracy() {
   const { data, error, loading } = useSnapshot();
+  const isMobile = useIsMobile();
   if (loading) return <div className="label" style={{ padding: 24 }}>loading metrics…</div>;
   if (error || !data) return <div className="panel" style={{ padding: 16, borderColor: "var(--alert)" }}><div className="label" style={{ color: "var(--alert)" }}>metrics unavailable</div></div>;
 
@@ -47,6 +49,8 @@ export default function Accuracy() {
   const onset = pred.onset_value_add ?? {};
   const topics = m.topics ?? {};
   const folds: any[] = wf.folds ?? [];
+  const ev = m.external_validation;
+  const lagEntries: [string, number | null][] = ev ? Object.entries(ev.correlation_by_lag) : [];
 
   return (
     <div className="grid" style={{ gap: 12 }}>
@@ -61,14 +65,14 @@ export default function Accuracy() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "repeat(2, 1fr)" : "repeat(4, 1fr)", gap: 10 }}>
         <Tile label="predictor walk-forward auc" value={wf.mean_auc?.toFixed?.(3) ?? "—"} sub={`${wf.n_folds ?? 0} monthly folds`} tone="accent" />
         <Tile label="onset detection recall" value={pct(onset.predictor_recall)} sub="new disruptions · persistence 0%" tone="watch" />
         <Tile label="relevance recall (live)" value={pct(emb.recall)} sub="embeddings · was 59% tf-idf" />
         <Tile label="labeled dataset" value={String(data.summary.clean_events)} sub={`${data.summary.event_days} event-days`} />
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1.3fr", gap: 12 }}>
         <div className="panel">
           <Head tag="relevance classifier vs baselines" />
           <div style={{ padding: 14 }}>
@@ -101,7 +105,7 @@ export default function Accuracy() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 12, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1.3fr", gap: 12, alignItems: "start" }}>
         <div className="panel">
           <Head tag="leakage & robustness tests" />
           <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10, fontSize: 13 }}>
@@ -129,6 +133,43 @@ export default function Accuracy() {
           </div>
         </div>
       </div>
+
+      {ev && (
+        <div className="panel">
+          <Head tag="external validation — shipping vs. brent crude"
+            right={`n=${ev.n_obs} · best lag ${ev.best_lag_days >= 0 ? "+" : ""}${ev.best_lag_days}d · r=${ev.best_correlation?.toFixed(2)}`} />
+          <div style={{ padding: 14 }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 70, borderBottom: "1px solid var(--border)", paddingBottom: 2 }}>
+              {lagEntries.map(([lag, r]) => {
+                const v = r ?? 0;
+                const isBest = Number(lag) === ev.best_lag_days;
+                return (
+                  <div key={lag} style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "flex-end", height: "100%" }}
+                    title={`lag ${lag}d: r=${r?.toFixed(3) ?? "—"}`}>
+                    <div style={{
+                      height: `${Math.max(2, Math.abs(v) * 300)}%`,
+                      background: isBest ? "var(--accent)" : v < 0 ? "var(--alert)" : "var(--muted)",
+                      opacity: isBest ? 1 : 0.5,
+                      borderRadius: "2px 2px 0 0",
+                    }} />
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "var(--muted)", marginTop: 2 }}>
+              <span>brent leads (−14d)</span>
+              <span>same day</span>
+              <span>P leads (+14d)</span>
+            </div>
+            <div style={{ fontSize: 13, marginTop: 10 }}>{ev.interpretation}</div>
+            <div style={{ fontSize: 11, color: "var(--muted)", marginTop: 6 }}>
+              {ev.method} Index: {ev.index}. Chosen over container-freight indices (Freightos Baltic,
+              Drewry WCI) because those require a paid subscription for historical data; Brent crude
+              is freely available with full daily history.
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

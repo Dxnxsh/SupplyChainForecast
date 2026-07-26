@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import type { Snapshot } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
-const CACHE_VERSION = "2";
+const CACHE_VERSION = "7";
 const STORAGE_PREFIX = `snap_v${CACHE_VERSION}_`;
 const PREFETCH_DAYS = 30;
 
@@ -13,6 +13,17 @@ interface State {
 }
 
 let prefetchStarted = false;
+const inFlight = new Map<string, Promise<Snapshot>>();
+
+/** Share one request across concurrent callers for the same key (e.g. switching pages
+ * before the first fetch for "live" resolves shouldn't trigger a second full backend rebuild). */
+function fetchDeduped(key: string, asOf: string | null): Promise<Snapshot> {
+  const existing = inFlight.get(key);
+  if (existing) return existing;
+  const p = fetchSnapshot(asOf).finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
 
 function dateKey(asOf: string | null): string {
   return asOf ?? "live";
@@ -53,7 +64,7 @@ function writeCache(key: string, data: Snapshot) {
 
 function pastDates(days: number): string[] {
   const dates: string[] = [];
-  const now = new Date("2026-06-28");
+  const now = new Date();
   for (let i = 1; i <= days; i++) {
     const d = new Date(now.getTime() - i * 86400000);
     dates.push(d.toISOString().slice(0, 10));
@@ -116,7 +127,7 @@ export function useSnapshot(asOf?: string | null): State {
 
     setState((s) => ({ ...s, loading: true }));
 
-    fetchSnapshot(asOf ?? null)
+    fetchDeduped(key, asOf ?? null)
       .then((data) => {
         writeCache(key, data);
         if (alive) setState({ data, error: null, loading: false });
@@ -142,11 +153,13 @@ export function useSnapshot(asOf?: string | null): State {
     return () => { alive = false; };
   }, [asOf]);
 
-  // Prefetch recent 30 days after first load
+  // Prefetch recent 30 days after first load, delayed so it never competes
+  // with first paint's own network traffic.
   useEffect(() => {
     if (!prefetched.current && state.data && !state.loading) {
       prefetched.current = true;
-      prefetchRecent();
+      const t = setTimeout(prefetchRecent, 6000);
+      return () => clearTimeout(t);
     }
   }, [state.data, state.loading]);
 

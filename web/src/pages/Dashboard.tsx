@@ -4,12 +4,14 @@ import { useDate } from "../lib/DateContext";
 import KpiStrip from "../components/KpiStrip";
 import SectorCard from "../components/SectorCard";
 import EmergingRisks from "../components/EmergingRisks";
+import StatusLegend from "../components/StatusLegend";
+import { DashboardSkeleton } from "../components/Skeleton";
 
 export default function Dashboard() {
   const { asOf } = useDate();
   const { data, error, loading } = useSnapshot(asOf);
 
-  if (loading) return <div className="label" style={{ padding: 24 }}>loading snapshot…</div>;
+  if (loading) return <DashboardSkeleton />;
   if (error || !data)
     return (
       <div className="panel" style={{ padding: 16, borderColor: "var(--alert)" }}>
@@ -49,6 +51,8 @@ export default function Dashboard() {
           <div style={{ fontSize: 12, color: "var(--muted)" }}>{data.data_note}</div>
         </div>
       </div>
+
+      <StatusLegend />
 
       <KpiStrip snap={data} />
 

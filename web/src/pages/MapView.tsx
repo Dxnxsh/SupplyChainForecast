@@ -2,6 +2,12 @@ import { useMemo, useState } from "react";
 import { ComposableMap, Geographies, Geography, Marker, Line, ZoomableGroup } from "react-simple-maps";
 import { useSnapshot } from "../lib/useSnapshot";
 import { useDate } from "../lib/DateContext";
+import StatusLegend from "../components/StatusLegend";
+import { MapSkeleton } from "../components/Skeleton";
+import { useIsMobile } from "../lib/useIsMobile";
+import { TrendChart } from "../components/Sparkline";
+import HoverDetails from "../components/HoverDetails";
+import { guidanceFor } from "../lib/actionGuidance";
 import type { Sector, Status } from "../lib/types";
 
 const GEO_URL = `${import.meta.env.BASE_URL}data/world-110m.json`;
@@ -28,6 +34,7 @@ export default function MapView() {
   const { asOf } = useDate();
   const { data, error, loading } = useSnapshot(asOf);
   const [sel, setSel] = useState<string | null>(null);
+  const isMobile = useIsMobile();
 
   const ordered = useMemo(
     () =>
@@ -38,7 +45,7 @@ export default function MapView() {
     ordered.find((s) => s.key === sel) ?? ordered[0];
   const shippingActive = data?.sectors.find((s) => s.key === "shipping_chokepoints")?.status === "active";
 
-  if (loading) return <div className="label" style={{ padding: 24 }}>loading map…</div>;
+  if (loading) return <MapSkeleton />;
   if (error || !data)
     return (
       <div className="panel" style={{ padding: 16, borderColor: "var(--alert)" }}>
@@ -53,7 +60,7 @@ export default function MapView() {
         <div style={{ color: "var(--muted)", fontSize: 14 }}>Where disruptions are happening now. By sectors and live events</div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: 12, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "minmax(0, 1fr) 300px", gap: 12, alignItems: "start" }}>
         <div className="panel" style={{ padding: 8, position: "relative" }}>
           <div style={{ position: "absolute", top: 14, left: 14, zIndex: 2, display: "flex", gap: 12, fontSize: 11 }}>
             <span><span className="led calm" style={{ display: "inline-block", verticalAlign: "middle" }} /> calm</span>
@@ -106,6 +113,9 @@ export default function MapView() {
           <div style={{ fontSize: 11, color: "var(--muted)", padding: "2px 6px 4px" }}>
             <i className="ti ti-click" aria-hidden="true" /> markers = sectors (click to inspect) · dots = recent geocoded events · scroll to zoom
           </div>
+          <div style={{ padding: "0 6px 6px" }}>
+            <StatusLegend />
+          </div>
         </div>
 
         <div className="grid" style={{ gap: 12 }}>
@@ -128,27 +138,72 @@ export default function MapView() {
 
           {selected && (
             <div className="panel" style={{ padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 15 }}>{selected.name}</div>
-                <span className={`pill ${selected.status}`}>{selected.status === "active" ? "active" : selected.status}</span>
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  {selected.data_confidence === "limited" && (
+                    <span
+                      className="pill"
+                      title={`Only ${selected.train_pos ?? "few"} confirmed disruption days in training history — predictions here are less reliable.`}
+                      style={{ borderColor: "var(--border-strong)", color: "var(--muted)" }}
+                    >
+                      <i className="ti ti-alert-triangle" aria-hidden="true" /> limited history
+                    </span>
+                  )}
+                  <span className={`pill ${selected.status}`}>{selected.status === "active" ? "active" : selected.status}</span>
+                </div>
               </div>
               <div className="label" style={{ fontSize: 11 }}>{selected.subtitle}</div>
               <div style={{ fontSize: 13, lineHeight: 1.6 }}>{selected.summary}</div>
-              <div style={{ background: "var(--panel-2)", borderRadius: 8, padding: "8px 10px" }}>
-                <div className="label" style={{ fontSize: 10 }}>next 3 days</div>
+              <div style={{ background: "var(--panel-2)", borderRadius: 8, padding: "8px 10px", opacity: selected.data_confidence === "limited" ? 0.7 : 1 }}>
+                <div className="label" style={{ fontSize: 10 }}>next 3 days{selected.data_confidence === "limited" ? " · low confidence" : ""}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 3 }}>
                   <span style={{ fontSize: 13, textTransform: "capitalize" }}>{selected.outlook}</span>
                   <span className="bar" style={{ flex: 1, background: "var(--panel)" }}>
-                    <span className={`fill-${selected.status}`} style={{ width: `${Math.round(selected.p * 100)}%` }} />
+                    <span className={selected.data_confidence === "limited" ? "" : `fill-${selected.status}`} style={{ width: `${Math.round(selected.p * 100)}%`, background: selected.data_confidence === "limited" ? "var(--muted)" : undefined }} />
                   </span>
-                  <span style={{ fontSize: 12, color: toneVar(selected.status) }}>{selected.likelihood}</span>
+                  <span style={{ fontSize: 12, color: selected.data_confidence === "limited" ? "var(--muted)" : toneVar(selected.status) }}>{selected.likelihood}</span>
                 </div>
               </div>
-              {selected.headlines.length > 0 && (
-                <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, lineHeight: 1.6 }}>
-                  {selected.headlines.map((h, i) => <li key={i}>{h.title}</li>)}
-                </ul>
+              {selected.trend.length > 1 && (
+                <div>
+                  <div className="label" style={{ fontSize: 10, marginBottom: 4 }}>30-day trend</div>
+                  <TrendChart data={selected.trend} color={toneVar(selected.status)} />
+                </div>
               )}
+              {(() => {
+                const guidance = guidanceFor(selected);
+                const hasDetails = Boolean(guidance) || selected.drivers.length > 0 || selected.headlines.length > 0;
+                if (!hasDetails) return null;
+                return (
+                  <HoverDetails key={selected.key}>
+                    {selected.drivers.length > 0 && (
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 11, lineHeight: 1.6, color: "var(--muted)" }}>
+                        {selected.drivers.map((d, i) => <li key={i}>{d}</li>)}
+                      </ul>
+                    )}
+                    {guidance && (
+                      <div style={{ fontSize: 11, lineHeight: 1.5, color: "var(--muted)" }}>
+                        <strong style={{ color: "var(--ink)" }}>What this can mean: </strong>
+                        {guidance}
+                      </div>
+                    )}
+                    {selected.headlines.length > 0 && (
+                      <ul style={{ margin: 0, paddingLeft: 16, fontSize: 12, lineHeight: 1.6 }}>
+                        {selected.headlines.map((h, i) => (
+                          <li key={i}>
+                            {h.url ? (
+                              <a href={h.url} target="_blank" rel="noopener noreferrer" style={{ color: "inherit" }}>
+                                {h.title}
+                              </a>
+                            ) : h.title}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </HoverDetails>
+                );
+              })()}
             </div>
           )}
         </div>

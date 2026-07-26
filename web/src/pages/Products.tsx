@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useSnapshot } from "../lib/useSnapshot";
 import { useDate } from "../lib/DateContext";
+import { useIsMobile } from "../lib/useIsMobile";
 import type { Status } from "../lib/types";
 
 interface ProductDef {
@@ -114,6 +115,7 @@ interface SectorRow {
 export default function Products() {
   const { asOf } = useDate();
   const { data, error, loading } = useSnapshot(asOf);
+  const isMobile = useIsMobile();
 
   const pMap = useMemo(() => {
     if (!data) return {} as Record<string, number>;
@@ -135,17 +137,12 @@ export default function Products() {
 
   return (
     <div className="grid" style={{ gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 8 }}>
-        <div>
-          <h1 className="display" style={{ margin: 0, fontSize: 24, letterSpacing: "0.03em" }}>Product supply chain</h1>
-          <div style={{ color: "var(--muted)", fontSize: 14 }}>Sector forecasts composed into approximate bill-of-materials exposure per product</div>
-        </div>
-        <div className="panel" style={{ padding: "6px 12px", fontSize: 11, color: "var(--muted)", maxWidth: 340 }}>
-          <i className="ti ti-info-circle" aria-hidden="true" /> These are <strong>compositions</strong> of the five sector forecasts using estimated BOM weights. Treat as directional, not precise.
-        </div>
+      <div>
+        <h1 className="display" style={{ margin: 0, fontSize: 24, letterSpacing: "0.03em" }}>Product supply chain</h1>
+        <div style={{ color: "var(--muted)", fontSize: 14 }}>Sector forecasts composed into approximate bill-of-materials exposure per product</div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(2, 1fr)", gap: 12 }}>
         {PRODUCTS.map((prod) => {
           const rows: SectorRow[] = Object.entries(prod.weights)
             .filter(([, w]) => w > 0)
@@ -231,10 +228,6 @@ export default function Products() {
             </div>
           );
         })}
-      </div>
-
-      <div className="panel" style={{ padding: "10px 14px", fontSize: 12, color: "var(--muted)" }}>
-        <strong style={{ color: "var(--ink)" }}>How this works:</strong> Each sector has a disruption probability score from the predictor model (walk-forward AUC 0.733). Product exposure is the weighted average of those scores using approximate bill-of-materials proportions. A score above 30% is flagged elevated; 15–30% is watch. BOM weights are estimates — actual exposure depends on each manufacturer's sourcing.
       </div>
     </div>
   );

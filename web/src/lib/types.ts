@@ -3,6 +3,7 @@ export type Status = "calm" | "watch" | "active";
 export interface Headline {
   title: string;
   date: string;
+  url: string | null;
 }
 
 export interface Sector {
@@ -18,6 +19,10 @@ export interface Sector {
   status: Status;
   summary: string;
   headlines: Headline[];
+  data_confidence: "limited" | "normal" | "unknown";
+  train_pos: number | null;
+  trend: { date: string; p: number }[];
+  drivers: string[];
 }
 
 export interface MapPoint {

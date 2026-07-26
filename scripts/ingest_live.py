@@ -149,18 +149,19 @@ def add_geocode(articles: list[dict]) -> None:
     from src.preprocessing import extract_locations_batch
     from src.geocoding import geocode_batch
 
-    texts = [a["event_text_segment"] for a in articles]
-    locs_batch = extract_locations_batch(texts)
-    loc_strings = [locs[0] for locs in locs_batch if locs]
-    coords = geocode_batch(loc_strings)
-    for article, locs in zip(articles, locs_batch):
-        if locs:
-            lat, lon = coords.get(locs[0], (None, None))
-            article["latitude"] = lat
-            article["longitude"] = lon
+    texts = [f"{a.get('article_title') or ''}. {a.get('event_text_segment') or ''}" for a in articles]
+    entities_per_doc = extract_locations_batch(texts)
+    hits = geocode_batch(entities_per_doc)
+    for article, ents, hit in zip(articles, entities_per_doc, hits):
+        article["extracted_locations"] = [name for name, _ in ents]
+        if hit:
+            article["latitude"] = hit["lat"]
+            article["longitude"] = hit["lon"]
+            article["geocode_confidence"] = hit["confidence"]
         else:
             article.setdefault("latitude", None)
             article.setdefault("longitude", None)
+            article["geocode_confidence"] = None
 
 
 def insert_events(conn, articles: list[dict]) -> list[int]:
@@ -170,14 +171,14 @@ def insert_events(conn, articles: list[dict]) -> list[int]:
             INSERT INTO events (
                 article_url, article_source, article_title, article_timestamp,
                 event_text_segment, sentiment_score, sentiment_label,
-                latitude, longitude,
+                latitude, longitude, geocode_confidence,
                 potential_event_types, extracted_locations, matched_node,
                 risk_score, risk_relevance_score, risk_severity_score
             ) VALUES (
                 :url, :source, :title, :ts,
                 :body, :sent_score, :sent_label,
-                :lat, :lon,
-                '[]'::jsonb, '[]'::jsonb, '[]'::jsonb,
+                :lat, :lon, :geo_conf,
+                '[]'::jsonb, CAST(:locs AS jsonb), '[]'::jsonb,
                 0.0, 0.0, 0.0
             )
             ON CONFLICT (article_url) DO NOTHING
@@ -192,6 +193,8 @@ def insert_events(conn, articles: list[dict]) -> list[int]:
             "sent_label": a.get("sentiment_label"),
             "lat": a.get("latitude"),
             "lon": a.get("longitude"),
+            "geo_conf": a.get("geocode_confidence"),
+            "locs": json.dumps(a.get("extracted_locations") or []),
         }).fetchone()
         a["_db_id"] = row[0] if row else None
         if row:
@@ -331,7 +334,7 @@ def run_cycle(
 
     # Geocode (optional — heavy, only feeds map dots)
     if geocode:
-        print(f"  Geocoding (GLiNER2) …")
+        print(f"  Geocoding (spaCy NER + offline gazetteer) …")
         try:
             add_geocode(articles)
         except Exception as e:

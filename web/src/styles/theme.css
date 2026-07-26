@@ -64,6 +64,17 @@ body {
   border-radius: 8px;
 }
 
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.skeleton {
+  background: var(--panel-2);
+  border-radius: 6px;
+  animation: skeleton-pulse 1.4s ease-in-out infinite;
+}
+
 .panel-head {
   display: flex;
   align-items: center;
@@ -110,3 +121,4 @@ button.ghost:hover { border-color: var(--border-strong); }
 
 .wrap { max-width: 1120px; margin: 0 auto; padding: 16px; }
 .grid { display: grid; gap: 10px; }
+.grid > * { min-width: 0; }

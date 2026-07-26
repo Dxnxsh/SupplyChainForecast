@@ -131,8 +131,8 @@ snapshot's `metrics` block, which feeds the Accuracy page.
 `FINBERT_MODEL`, `USE_FINBERT_RISK`, `TORCH_DEVICE`, `RSS_FEEDS_PATH`.
 
 Live-ingest scheduler (`src/api.py`, all optional): `INGEST_INTERVAL_SECONDS` (default 1800),
-`INGEST_CYCLE_TIMEOUT_S` (default 600), `INGEST_NO_GEOCODE` (default true — geocoding is
-currently broken, see below), `DISABLE_BACKGROUND_INGEST` (default false).
+`INGEST_CYCLE_TIMEOUT_S` (default 600), `INGEST_NO_GEOCODE` (default false — geocoding is
+implemented and enabled by default, see below), `DISABLE_BACKGROUND_INGEST` (default false).
 
 ## Notes for future work
 
@@ -141,7 +141,28 @@ currently broken, see below), `DISABLE_BACKGROUND_INGEST` (default false).
   always use/preserve the 3-day smoothing when touching prediction code.
 - `data/live_feed.json` is the rolling live-feed list rendered on the Feed page; it's
   regenerated/appended by `scripts/ingest_live.py` each cycle.
-- Geocoding (`add_geocode` in `scripts/ingest_live.py`) is currently broken — it imports
-  `src.preprocessing`, which does not exist in this repo. It's caught as a non-fatal warning per
-  cycle, but map dots and NER-based location extraction won't populate until it's reimplemented.
-  This is why `INGEST_NO_GEOCODE` defaults to true.
+- **Geocoding** (`add_geocode` in `scripts/ingest_live.py`, rebuilt 2026-07): location
+  extraction is `src/preprocessing.py` (spaCy `en_core_web_sm`, GPE/LOC entities, offline, no
+  LLM) and resolution is `src/geocoding.py` (offline gazetteer — `geonamescache` country/city
+  data plus a small hand-curated table of maritime chokepoints like Hormuz/Suez/Bab-el-Mandeb
+  that aren't cities or countries). Each match carries a `geocode_confidence` (0-1) score based
+  on match specificity (chokepoint/country match ≈0.9-0.95, unique city match ≈0.85, ambiguous
+  same-named city ≈0.6); `scripts/build_ui_snapshot.py::map_points()` drops anything below
+  `MIN_GEOCODE_CONFIDENCE` (0.65) going forward, while keeping pre-rebuild rows (`NULL`
+  confidence) since there's no way to score them retroactively. A `GENERIC_BLOCKLIST` in
+  `src/geocoding.py` excludes continent/region words ("Asia", "the Middle East", etc.) that
+  would otherwise spuriously match an obscure same-named town. `INGEST_NO_GEOCODE` now defaults
+  to `false`; set it to `true` to disable geocoding (e.g. for a faster dry run) — it adds well
+  under a second per article and doesn't meaningfully affect the ~30-60s a live cycle takes.
+- **Predictor retrain cadence**: the calibrator is sparse (~584 labelled events as of 2026-07),
+  so it's worth retraining periodically as the live-ingested dataset grows rather than on a fixed
+  calendar schedule. Retrigger `venv311/bin/python -m scripts.train_predictor` when either (a) the
+  labelled dataset (`disruption_candidates` where `is_risk_event AND strict_is_risk`) has grown by
+  roughly 100+ new clean events since the last retrain, or (b) it's been over a month of live
+  ingestion, whichever comes first. After retraining, compare `data/predictor_metrics.json`
+  against the previous version before deploying the new `model_training/predictor.pkl`: walk-forward
+  `mean_auc` shouldn't regress, and check `per_target[*].train_pos` — a sector crossing the
+  `LOW_DATA_TRAIN_POS` threshold (30, in `scripts/build_ui_snapshot.py`) should see its "limited
+  history" badge disappear from the UI, which is a good sanity signal that the retrain used the
+  updated data. Keep the isotonic-vs-Platt calibration choice under review as `data/predictor_metrics.json`'s
+  positive count grows — isotonic needs more data to avoid overfitting the calibration curve.

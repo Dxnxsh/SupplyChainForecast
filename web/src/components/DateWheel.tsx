@@ -1,12 +1,9 @@
-import { useRef, useEffect, useCallback, useState } from "react";
+import { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import { useDate } from "../lib/DateContext";
 
 const DAY_MS = 86400000;
 const START = new Date("2025-06-01").getTime();
-const END = new Date("2026-06-28").getTime();
-const TOTAL_DAYS = Math.round((END - START) / DAY_MS);
 const TICK_W = 6;
-const CONTENT_W = (TOTAL_DAYS + 1) * TICK_W;
 
 function fmt(ts: number): string {
   return new Date(ts).toISOString().slice(0, 10);
@@ -25,7 +22,7 @@ function fmtMonth(ts: number): string {
 }
 
 export default function DateWheel() {
-  const { asOf, setAsOf } = useDate();
+  const { asOf, setAsOf, maxDate } = useDate();
   const trackRef = useRef<HTMLDivElement>(null);
   const ready = useRef(false);
   const programmatic = useRef(false);
@@ -35,21 +32,28 @@ export default function DateWheel() {
   const dragStartScroll = useRef(0);
   const [halfW, setHalfW] = useState(0);
 
-  const [heights] = useState(() => {
+  // Falls back to today until the live max date resolves, then self-corrects.
+  const END = useMemo(() => (maxDate ? new Date(maxDate).getTime() : Date.now()), [maxDate]);
+  const TOTAL_DAYS = Math.round((END - START) / DAY_MS);
+  const CONTENT_W = (TOTAL_DAYS + 1) * TICK_W;
+
+  const heights = useMemo(() => {
     const h: number[] = [];
     for (let i = 0; i <= TOTAL_DAYS; i++) {
       const ts = START + i * DAY_MS;
-      const d = new Date(ts);
-      if (d.getDate() === 1) h.push(1.0);
-      else if (d.getDay() === 1) h.push(0.65);
-      else h.push(0.3 + (((i * 7) % 13) / 30));
+      h.push(new Date(ts).getDate() === 1 ? 1.0 : 0.4);
     }
     return h;
-  });
+  }, [TOTAL_DAYS]);
 
   const currentIdx = asOf
     ? Math.round((new Date(asOf).getTime() - START) / DAY_MS)
     : TOTAL_DAYS;
+
+  // Tracks the in-flight target index so rapid clicks accumulate instead of
+  // each reading the same stale render-time currentIdx.
+  const pendingIdx = useRef(currentIdx);
+  useEffect(() => { pendingIdx.current = currentIdx; }, [currentIdx]);
 
   useEffect(() => {
     const el = trackRef.current;
@@ -76,12 +80,15 @@ export default function DateWheel() {
   }, [halfW]);
 
   useEffect(() => {
-    if (!halfW) return;
+    // Wait for the real end-of-range before the first scroll commit — scrolling to
+    // a provisional "today" fallback and then jumping once maxDate resolves would
+    // fire a spurious native scroll event that knocks the wheel off "live".
+    if (!halfW || !maxDate) return;
     scrollToIdx(currentIdx, true);
     const t = setTimeout(() => { ready.current = true; }, 200);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [halfW]);
+  }, [halfW, maxDate]);
 
   useEffect(() => {
     if (ready.current && halfW) scrollToIdx(currentIdx);
@@ -149,19 +156,20 @@ export default function DateWheel() {
   }, [onScroll]);
 
   const step = (dir: -1 | 1) => {
-    const next = Math.max(0, Math.min(TOTAL_DAYS, currentIdx + dir));
+    const next = Math.max(0, Math.min(TOTAL_DAYS, pendingIdx.current + dir));
+    pendingIdx.current = next;
     if (next === TOTAL_DAYS) setAsOf(null);
     else setAsOf(fmt(START + next * DAY_MS));
   };
 
   return (
-    <div className="panel" style={{ padding: "8px 0", overflow: "hidden" }}>
+    <div className="panel" style={{ padding: "4px 0", overflow: "hidden" }}>
       <div style={{ display: "flex", alignItems: "center" }}>
         <button
           onClick={() => step(-1)}
           style={{
             border: "none", background: "transparent", cursor: "pointer",
-            padding: "8px 14px", fontSize: 20, color: "var(--muted)", flexShrink: 0,
+            padding: "4px 10px", fontSize: 15, color: "var(--muted)", flexShrink: 0,
           }}
           aria-label="Previous day"
         >‹</button>
@@ -187,7 +195,7 @@ export default function DateWheel() {
               scrollbarWidth: "none",
             }}
           >
-            <div style={{ display: "flex", alignItems: "flex-end", height: 36 }}>
+            <div style={{ display: "flex", alignItems: "flex-end", height: 20 }}>
               <div style={{ width: halfW, flexShrink: 0 }} />
               {heights.map((h, i) => {
                 const ts = START + i * DAY_MS;
@@ -219,7 +227,7 @@ export default function DateWheel() {
               <div style={{ width: halfW, flexShrink: 0 }} />
             </div>
 
-            <div style={{ display: "flex", height: 14, position: "relative" }}>
+            <div style={{ display: "flex", height: 11, position: "relative" }}>
               <div style={{ width: halfW, flexShrink: 0 }} />
               <div style={{ width: CONTENT_W, flexShrink: 0, position: "relative" }}>
                 {heights.map((_, i) => {
@@ -233,7 +241,7 @@ export default function DateWheel() {
                         position: "absolute",
                         left: i * TICK_W,
                         transform: "translateX(-50%)",
-                        fontSize: 9, color: "var(--muted)",
+                        fontSize: 8, color: "var(--muted)",
                         whiteSpace: "nowrap", letterSpacing: "0.05em",
                       }}
                     >
@@ -251,15 +259,15 @@ export default function DateWheel() {
           onClick={() => step(1)}
           style={{
             border: "none", background: "transparent", cursor: "pointer",
-            padding: "8px 14px", fontSize: 20, color: "var(--muted)", flexShrink: 0,
+            padding: "4px 10px", fontSize: 15, color: "var(--muted)", flexShrink: 0,
           }}
           aria-label="Next day"
         >›</button>
       </div>
 
-      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 12, marginTop: 4 }}>
+      <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: 10, marginTop: 1 }}>
         <span style={{
-          fontFamily: "IBM Plex Mono, monospace", fontSize: 11,
+          fontFamily: "IBM Plex Mono, monospace", fontSize: 10,
           color: asOf ? "var(--ink)" : "var(--alert)", letterSpacing: "0.08em",
         }}>
           {asOf ? fmtLabel(new Date(asOf).getTime()) : "● LIVE"}
@@ -269,12 +277,15 @@ export default function DateWheel() {
             onClick={() => setAsOf(null)}
             style={{
               border: "1px solid var(--border)", background: "transparent",
-              borderRadius: 4, padding: "2px 8px", fontSize: 10,
+              borderRadius: 4, padding: "1px 7px", fontSize: 9,
               color: "var(--alert)", cursor: "pointer",
               letterSpacing: "0.08em", textTransform: "uppercase",
             }}
           >● live</button>
         )}
+        <span style={{ fontSize: 9, color: "var(--muted)" }}>
+          · drag or scroll to rewind · dots are month starts
+        </span>
       </div>
     </div>
   );

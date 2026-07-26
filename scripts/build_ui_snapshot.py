@@ -26,6 +26,7 @@ load_dotenv(".env")
 
 import numpy as np
 import pandas as pd
+import xgboost as xgb
 from sqlalchemy import create_engine, text
 
 from src.db_config import get_read_db_url
@@ -62,6 +63,61 @@ def status_of(p, clean_3d, clean_7d):
     return "calm"
 
 
+TREND_DAYS = 30
+
+
+FEATURE_PHRASES = {
+    "vol_1d": "news volume spiked in the last day",
+    "vol_3d": "news volume rose over the last 3 days",
+    "vol_7d": "news volume rose over the last week",
+    "vol_14d": "news volume has stayed elevated for two weeks",
+    "sent_mean_3d": "average sentiment turned negative over 3 days",
+    "sent_mean_7d": "average sentiment turned negative over the past week",
+    "sent_min_3d": "a sharply negative story appeared in the last 3 days",
+    "sent_min_7d": "a sharply negative story appeared this week",
+    "sent_delta_3d": "sentiment shifted sharply",
+    "kw_hits_1d": "risk-keyword mentions rose today",
+    "kw_hits_3d": "risk-keyword mentions rose over 3 days",
+    "clean_cnt_3d": "confirmed disruption events rose over 3 days",
+    "clean_cnt_7d": "confirmed disruption events rose over the week",
+    "clean_cnt_14d": "confirmed disruption events have stayed elevated for two weeks",
+    "days_since_clean": "a confirmed disruption happened recently",
+    "cross_clean_3d": "disruptions are rising in other sectors too",
+    "dow": "day-of-week pattern in the historical data",
+    "is_weekend": "weekend timing pattern in the historical data",
+}
+
+TOP_DRIVERS_N = 3
+
+
+def top_drivers(model, feats, row):
+    """Plain-language phrases for the top positive XGBoost pred_contribs on this row —
+    the features actually pushing today's prediction toward disruption, not just globally
+    important features."""
+    dmat = xgb.DMatrix(row[feats].values.reshape(1, -1), feature_names=feats)
+    contribs = model.get_booster().predict(dmat, pred_contribs=True)[0][:-1]  # drop bias term
+    ranked = sorted(zip(feats, contribs), key=lambda x: x[1], reverse=True)
+    phrases = []
+    for name, val in ranked:
+        if val <= 0 or len(phrases) >= TOP_DRIVERS_N:
+            break
+        phrase = FEATURE_PHRASES.get(name)
+        if phrase:
+            phrases.append(phrase)
+    return phrases
+
+
+def smoothed_series(model, cal, cal_kind, feats, tail):
+    """3-day-trailing-smoothed calibrated P for each row of `tail`, in chronological order."""
+    raw_ps = []
+    for _, r in tail.iterrows():
+        raw_i = model.predict_proba(r[feats].values.reshape(1, -1))[:, 1]
+        p_i = float(np.clip(cal.predict(raw_i) if cal_kind == "isotonic"
+                            else cal.predict_proba(raw_i.reshape(-1, 1))[:, 1], 0, 1)[0])
+        raw_ps.append(p_i)
+    return [float(np.mean(raw_ps[max(0, i - 2):i + 1])) for i in range(len(raw_ps))]
+
+
 SUMMARY = {
     "active": "Recent disruptions detected in the news; conditions remain elevated.",
     "watch": "Some risk signals appearing in the news; no major disruption confirmed yet.",
@@ -72,7 +128,7 @@ SUMMARY = {
 def recent_headlines(conn, themes, kw, as_of, days=120, limit=3):
     since = (as_of - pd.Timedelta(days=days)).date()
     rows = conn.execute(text("""
-        SELECT dc.article_title, dc.article_date
+        SELECT dc.article_title, dc.article_date, dc.article_url
         FROM disruption_candidates dc
         WHERE dc.is_risk_event AND dc.strict_is_risk
           AND dc.article_date <= :asof
@@ -83,24 +139,48 @@ def recent_headlines(conn, themes, kw, as_of, days=120, limit=3):
         LIMIT :lim
     """), {"asof": as_of.date(), "since": since, "themes": themes,
            "kw": kw, "lim": limit}).fetchall()
-    return [{"title": r[0][:120], "date": str(r[1])} for r in rows]
+    return [{"title": r[0][:120], "date": str(r[1]), "url": r[2]} for r in rows]
+
+
+MIN_GEOCODE_CONFIDENCE = 0.65
 
 
 def map_points(conn, as_of, days=30, limit=80):
+    # geocode_confidence is only populated by the rebuilt spaCy+gazetteer geocoder (see
+    # src/preprocessing.py, src/geocoding.py); older rows geocoded before that rebuild have
+    # NULL confidence and are kept (dedup is the only filter available for them), but new
+    # low-confidence matches (ambiguous city names) are dropped outright.
     since = (as_of - pd.Timedelta(days=days)).date()
     rows = conn.execute(text(f"""
-        SELECT latitude, longitude, LEFT(article_title,90), article_timestamp::date
-        FROM events
-        WHERE latitude IS NOT NULL AND longitude IS NOT NULL
-          AND {BLOB} ~ :cand
-          AND article_timestamp::date <= :asof AND article_timestamp::date > :since
-        ORDER BY article_timestamp DESC LIMIT :lim
-    """), {"cand": CANDIDATE_RE, "asof": as_of.date(), "since": since, "lim": limit}).fetchall()
+        SELECT lat, lon, title, dt FROM (
+            SELECT DISTINCT ON (latitude, longitude)
+                   latitude AS lat, longitude AS lon,
+                   LEFT(article_title, 90) AS title,
+                   article_timestamp AS ts, article_timestamp::date AS dt
+            FROM events
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+              AND (geocode_confidence IS NULL OR geocode_confidence >= :min_conf)
+              AND {BLOB} ~ :cand
+              AND article_timestamp::date <= :asof AND article_timestamp::date > :since
+            ORDER BY latitude, longitude, article_timestamp DESC
+        ) deduped
+        ORDER BY ts DESC LIMIT :lim
+    """), {"cand": CANDIDATE_RE, "asof": as_of.date(), "since": since, "lim": limit,
+           "min_conf": MIN_GEOCODE_CONFIDENCE}).fetchall()
     return [{"lat": float(r[0]), "lon": float(r[1]), "title": r[2], "date": str(r[3])} for r in rows]
 
 
 def load_metric(path):
     return json.load(open(path)) if os.path.exists(path) else None
+
+
+LOW_DATA_TRAIN_POS = 30  # below this many training-positive days, flag as limited history
+
+
+def data_confidence_of(train_pos):
+    if train_pos is None:
+        return "unknown"
+    return "limited" if train_pos < LOW_DATA_TRAIN_POS else "normal"
 
 
 def live_summary(conn):
@@ -131,6 +211,46 @@ def max_db_date(conn) -> str | None:
     return str(row[0]) if row and row[0] else None
 
 
+ALERT_STATE_PATH = "data/alert_state.json"
+ALERTS_LOG_PATH = "data/alerts.json"
+MAX_ALERTS = 200
+
+
+def record_status_transitions(sectors, as_of):
+    """Append an in-app alert for any sector whose status changed since the last
+    live snapshot build. Only call this for live (non-rewind) runs — historical
+    --as-of backfills would otherwise pollute the alert log with fake transitions."""
+    prev_state = load_metric(ALERT_STATE_PATH) or {}
+    alerts = load_metric(ALERTS_LOG_PATH) or []
+
+    new_alerts = []
+    for s in sectors:
+        prev_status = prev_state.get(s["key"])
+        if prev_status and prev_status != s["status"]:
+            new_alerts.append({
+                "id": f"{s['key']}-{pd.Timestamp.utcnow().isoformat()}",
+                "ts": pd.Timestamp.utcnow().isoformat(),
+                "as_of": str(as_of.date()),
+                "sector_key": s["key"],
+                "sector_name": s["name"],
+                "from_status": prev_status,
+                "to_status": s["status"],
+                "p": s["p"],
+                "headline": s["headlines"][0] if s["headlines"] else None,
+            })
+        prev_state[s["key"]] = s["status"]
+
+    if new_alerts:
+        alerts = (new_alerts + alerts)[:MAX_ALERTS]
+        with open(ALERTS_LOG_PATH, "w") as f:
+            json.dump(alerts, f, indent=2)
+
+    with open(ALERT_STATE_PATH, "w") as f:
+        json.dump(prev_state, f, indent=2)
+
+    return new_alerts
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--as-of", default=None,
@@ -153,6 +273,8 @@ def main():
         as_of = pd.Timestamp(GRID_END)
 
     full_idx = pd.date_range(LOOKBACK_START, as_of, freq="D")
+    predictor_metrics = load_metric("data/predictor_metrics.json") or {}
+    per_target = predictor_metrics.get("per_target", {})
     sectors, points = [], []
     with engine.connect() as conn:
         g = conn.execute(text("""
@@ -162,31 +284,37 @@ def main():
         global_clean = pd.Series({pd.Timestamp(d): c for d, c in g}, dtype="float64")
 
         for key, themes in TARGETS.items():
-            news = daily_news(conn, TARGET_KEYWORDS[key])
+            news = daily_news(conn, TARGET_KEYWORDS[key], end=str(as_of.date()))
             clean = clean_event_days(conn, themes)
             f = build_target_frame(news, clean, global_clean, full_idx)
-            # Smooth P over 3-day window to reduce single-day jitter
-            tail = f.loc[f.index <= as_of].iloc[-3:]
-            ps = []
-            for _, r in tail.iterrows():
-                raw_i = model.predict_proba(r[feats].values.reshape(1, -1))[:, 1]
-                p_i = float(np.clip(cal.predict(raw_i) if cal_kind == "isotonic"
-                                    else cal.predict_proba(raw_i.reshape(-1, 1))[:, 1], 0, 1)[0])
-                ps.append(p_i)
-            p = float(np.mean(ps))
+            # Smooth P over a 3-day trailing window to reduce single-day jitter; keep
+            # enough history to also expose a TREND_DAYS-long smoothed trend line.
+            tail = f.loc[f.index <= as_of].iloc[-(TREND_DAYS + 2):]
+            smoothed = smoothed_series(model, cal, cal_kind, feats, tail)
+            p = smoothed[-1]
+            trend = [{"date": str(tail.index[i].date()), "p": round(smoothed[i], 3)}
+                     for i in range(len(tail))][-TREND_DAYS:]
             row = tail.iloc[-1]
             ol, lik = outlook(p)
             st = status_of(p, row["clean_cnt_3d"], row["clean_cnt_7d"])
             name, sub, icon, lat, lon = META[key]
+            train_pos = per_target.get(key, {}).get("train_pos")
             sectors.append({
                 "key": key, "name": name, "subtitle": sub, "icon": icon,
                 "lat": lat, "lon": lon,
                 "p": round(p, 3), "outlook": ol, "likelihood": lik, "status": st,
                 "summary": SUMMARY[st],
                 "headlines": recent_headlines(conn, themes, TARGET_KEYWORDS[key], as_of),
+                "data_confidence": data_confidence_of(train_pos),
+                "train_pos": train_pos,
+                "trend": trend,
+                "drivers": top_drivers(model, feats, row) if st != "calm" else [],
             })
         points = map_points(conn, as_of)
         total_articles, clean_events, event_days = live_summary(conn)
+
+    if not args.as_of:
+        record_status_transitions(sectors, as_of)
 
     n_active = sum(1 for s in sectors if s["status"] == "active")
     n_watch = sum(1 for s in sectors if s["status"] == "watch")
@@ -218,6 +346,7 @@ def main():
             "predictor": load_metric("data/predictor_metrics.json"),
             "predictor_test": load_metric("data/predictor_test_report.json"),
             "topics": load_metric("data/topic_model_summary.json"),
+            "external_validation": load_metric("data/external_validation.json"),
         },
     }
     os.makedirs(os.path.dirname(OUT), exist_ok=True)

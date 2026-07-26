@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSnapshot } from "../lib/useSnapshot";
 import { useDate } from "../lib/DateContext";
+import { TableSkeleton } from "../components/Skeleton";
 import type { FeedEntry } from "../lib/types";
 
 const SECTOR_SHORT: Record<string, string> = {
@@ -109,7 +110,7 @@ function EntryRow({ entry, expanded, onToggle }: {
                   <div className="label" style={{ fontSize: 10, marginBottom: 4 }}>sector it feeds</div>
                   <div>{SECTOR_SHORT[entry.sector_key] ?? entry.sector_key}</div>
                   <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>
-                    → bumps vol_1d, kw_hits_1d, and if confirmed clean event: clean_cnt_3d
+                    → raises this sector's news-volume and keyword signals for the next few days
                   </div>
                 </div>
               )}
@@ -119,7 +120,7 @@ function EntryRow({ entry, expanded, onToggle }: {
                   {entry.sentiment_score > 0 ? "positive" : entry.sentiment_score < 0 ? "negative" : "neutral"}{" "}
                   ({entry.sentiment_score > 0 ? "+" : ""}{entry.sentiment_score.toFixed(3)})
                 </div>
-                <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>feeds sent_mean/min rolling features</div>
+                <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>factors into the sector's rolling mood signal</div>
               </div>
               <div>
                 <a href={entry.url} target="_blank" rel="noopener noreferrer"
@@ -141,8 +142,10 @@ export default function Feed() {
   const { data, error, loading } = useSnapshot(asOf);
   const [expanded, setExpanded] = useState<number | null>(null);
   const [filter, setFilter] = useState<"all" | "relevant" | "filtered">("all");
+  const [search, setSearch] = useState("");
+  const [sector, setSector] = useState<string>("all");
 
-  if (loading) return <div className="label" style={{ padding: 24 }}>loading feed…</div>;
+  if (loading) return <TableSkeleton />;
   if (error || !data)
     return (
       <div className="panel" style={{ padding: 16, borderColor: "var(--alert)" }}>
@@ -151,12 +154,18 @@ export default function Feed() {
     );
 
   const feed = data.feed ?? [];
-  const filtered = feed.filter((e) =>
-    filter === "all" ? true : filter === "relevant" ? e.relevant : !e.relevant
-  );
+  const q = search.trim().toLowerCase();
+  const filtered = feed.filter((e) => {
+    if (filter === "relevant" && !e.relevant) return false;
+    if (filter === "filtered" && e.relevant) return false;
+    if (sector !== "all" && e.sector_key !== sector) return false;
+    if (q && !e.title.toLowerCase().includes(q) && !e.source.toLowerCase().includes(q)) return false;
+    return true;
+  });
 
   const nRelevant = feed.filter((e) => e.relevant).length;
   const nFiltered = feed.length - nRelevant;
+  const sectorsPresent = Array.from(new Set(feed.map((e) => e.sector_key).filter((k): k is string => !!k)));
 
   return (
     <div className="grid" style={{ gap: 12 }}>
@@ -188,13 +197,33 @@ export default function Feed() {
         </div>
       </div>
 
-      <div className="panel" style={{ padding: "8px 14px", fontSize: 12, color: "var(--muted)" }}>
-        <strong style={{ color: "var(--ink)" }}>How this works:</strong>{" "}
-        Each article is scored by the MiniLM embeddings classifier (relevance threshold 59%). Articles
-        that pass are routed to a supply-chain theme via cosine similarity to theme prototypes (τ=0.30).
-        Relevant articles are inserted into <code>disruption_candidates</code> and immediately shift the
-        sector's rolling-window features (vol, keyword hits, sentiment). The predictor re-runs on the
-        updated features each cycle.
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <input
+          type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="search headline or source (e.g. Hormuz)"
+          style={{
+            flex: "1 1 240px", padding: "6px 10px", fontSize: 12,
+            fontFamily: "IBM Plex Mono, monospace",
+            border: "1px solid var(--border)", borderRadius: 6,
+            background: "var(--panel)", color: "var(--ink)",
+          }}
+        />
+        <select
+          value={sector}
+          onChange={(e) => setSector(e.target.value)}
+          style={{
+            padding: "6px 10px", fontSize: 12, fontFamily: "IBM Plex Mono, monospace",
+            border: "1px solid var(--border)", borderRadius: 6,
+            background: "var(--panel)", color: "var(--ink)",
+          }}
+        >
+          <option value="all">all sectors</option>
+          {sectorsPresent.map((k) => (
+            <option key={k} value={k}>{SECTOR_SHORT[k] ?? k}</option>
+          ))}
+        </select>
       </div>
 
       {feed.length === 0 ? (
@@ -203,6 +232,10 @@ export default function Feed() {
           <div style={{ marginTop: 8, fontFamily: "IBM Plex Mono, monospace", fontSize: 12, color: "var(--muted)" }}>
             venv311/bin/python -m scripts.ingest_live --no-geocode
           </div>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="panel" style={{ padding: 24, textAlign: "center" }}>
+          <div className="label">no articles match this search/filter</div>
         </div>
       ) : (
         <div className="panel" style={{ overflowX: "auto" }}>

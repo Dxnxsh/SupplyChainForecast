@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import { useEffect, useState } from "react";
+import AlertsBell from "./AlertsBell";
 
 const NAV = [
   { to: "/", label: "Map", end: true },
@@ -35,7 +36,7 @@ export default function TopBar() {
         </div>
       </div>
 
-      <nav style={{ display: "flex", gap: 4 }}>
+      <nav style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
         {NAV.map((n) => (
           <NavLink
             key={n.to}
@@ -50,6 +51,7 @@ export default function TopBar() {
               border: "1px solid",
               borderColor: isActive ? "var(--border-strong)" : "transparent",
               color: isActive ? "var(--ink)" : "var(--muted)",
+              whiteSpace: "nowrap",
             })}
           >
             {n.label}
@@ -58,6 +60,7 @@ export default function TopBar() {
       </nav>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <AlertsBell />
         <button className="ghost" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label="toggle theme">
           <i className={theme === "light" ? "ti ti-moon" : "ti ti-sun"} aria-hidden="true" />
         </button>

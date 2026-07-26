@@ -1,0 +1,62 @@
+[
+  {
+    "id": "us_logistics-2026-07-17T00:21:45.850542+00:00",
+    "ts": "2026-07-17T00:21:45.850790+00:00",
+    "as_of": "2026-07-17",
+    "sector_key": "us_logistics",
+    "sector_name": "US ports & freight",
+    "from_status": "watch",
+    "to_status": "calm",
+    "p": 0.057,
+    "headline": {
+      "title": "California: First ILWU strike against sugar giant in decades",
+      "date": "2026-06-26",
+      "url": "https://www.freightwaves.com/news/california-first-ilwu-strike-against-sugar-giant-in-decades"
+    }
+  },
+  {
+    "id": "semiconductor_electronics-2026-07-16T22:08:23.543242+00:00",
+    "ts": "2026-07-16T22:08:23.543318+00:00",
+    "as_of": "2026-07-16",
+    "sector_key": "semiconductor_electronics",
+    "sector_name": "Semiconductors & electronics",
+    "from_status": "active",
+    "to_status": "watch",
+    "p": 0.195,
+    "headline": {
+      "title": "TSMC says AI demand can run to 2030 \u2013 lifting the outlook for air cargo",
+      "date": "2026-07-16",
+      "url": "https://theloadstar.com/tsmc-says-ai-demand-can-run-to-2030-lifting-outlook-for-air-cargo/"
+    }
+  },
+  {
+    "id": "us_logistics-2026-07-16T22:08:23.543338+00:00",
+    "ts": "2026-07-16T22:08:23.543345+00:00",
+    "as_of": "2026-07-16",
+    "sector_key": "us_logistics",
+    "sector_name": "US ports & freight",
+    "from_status": "active",
+    "to_status": "watch",
+    "p": 0.141,
+    "headline": {
+      "title": "California: First ILWU strike against sugar giant in decades",
+      "date": "2026-06-26",
+      "url": "https://www.freightwaves.com/news/california-first-ilwu-strike-against-sugar-giant-in-decades"
+    }
+  },
+  {
+    "id": "shipping_chokepoints-2026-07-15T11:22:52.501359+00:00",
+    "ts": "2026-07-15T11:22:52.501495+00:00",
+    "as_of": "2026-07-15",
+    "sector_key": "shipping_chokepoints",
+    "sector_name": "Shipping & oil routes",
+    "from_status": "active",
+    "to_status": "watch",
+    "p": 0.086,
+    "headline": {
+      "title": "Ukraine\u2019s Azov campaign eclipses the tanker wars of the 1980s",
+      "date": "2026-07-15",
+      "url": "https://splash247.com/ukraines-azov-campaign-eclipses-the-tanker-wars-of-the-1980s/"
+    }
+  }
+]

@@ -52,6 +52,7 @@ data/geocode_rejected.jsonl
 data/validation/
 data/raw/webhose_political/
 data/raw/webhose_financial/
+data/api_cache/
 
 # Trained models & generated training tables (keep *.py in model_training/)
 model_training/**/*.pkl
@@ -82,3 +83,10 @@ legacy/
 
 # BERTopic saved model (regenerable binary)
 model_training/bertopic_model/
+
+# Vite dependency-optimization cache
+.vite/
+
+# Working plan / dev-process notes — not project deliverables
+AGENTS.md
+IMPROVEMENT_PLAN.md

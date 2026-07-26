@@ -90,3 +90,8 @@ model_training/bertopic_model/
 # Working plan / dev-process notes — not project deliverables
 AGENTS.md
 IMPROVEMENT_PLAN.md
+DISRUPTION_REBUILD_DESIGN.md
+EMERGING_SECTORS_PLAN.md
+
+# Claude Code local tool config — not shared project config
+.claude/
